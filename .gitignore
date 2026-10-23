@@ -1,0 +1,32 @@
+# Android / Gradle
+*.apk
+*.aab
+*.ap_
+*.dex
+*.class
+bin/
+gen/
+out/
+build/
+.gradle/
+local.properties
+captures/
+*.jks
+*.keystore
+
+# IDE
+.idea/
+*.iml
+.vscode/
+.kotlin/
+
+# macOS
+.DS_Store
+
+# env / secrets
+.env
+.env.*
+!.env.example
+
+# local data
+.data/
