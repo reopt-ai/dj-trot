@@ -1,0 +1,38 @@
+#!/bin/sh
+# 커밋 메시지 검사 — 규칙은 CONTRIBUTING.md "커밋 메시지".
+# 켜기: git config core.hooksPath .githooks
+set -eu
+
+# 주석과 `git commit -v`의 diff(가위 줄 아래)를 뺀 메시지
+message=$(awk '/^# -+ >8 -+$/ { exit } !/^#/ { print }' "$1")
+header=$(printf '%s\n' "$message" | sed -n '1p')
+
+fail() {
+  printf 'commit-msg: %s\n' "$1" >&2
+  printf '  got: %s\n' "$header" >&2
+  printf '  want: <type>(<scope>)?: <subject>, e.g. "feat(dj): introduce requested songs by age"\n' >&2
+  printf '  rules: CONTRIBUTING.md\n' >&2
+  exit 1
+}
+
+# git이 만드는 메시지는 그대로 둔다
+case "$header" in
+  "Merge "* | "Revert \""* | "fixup! "* | "squash! "* | "amend! "*) exit 0 ;;
+esac
+
+types='feat|fix|refactor|perf|test|docs|build|ci|chore|style|revert'
+scopes='api|account|car|dj|playback|ui|tools|deps|release'
+printf '%s\n' "$header" | grep -Eq "^($types)(\(($scopes)\))?!?: .+" ||
+  fail "header must be '<type>(<scope>): <subject>' — types: ${types}; scopes: ${scopes}"
+
+subject=${header#*: }
+case "$subject" in
+  [[:upper:]]*) fail "subject must start lowercase (imperative: 'add', not 'Add')" ;;
+  *.) fail "subject must not end with a period" ;;
+esac
+
+length=$(printf '%s' "$header" | LC_ALL=en_US.UTF-8 wc -m | tr -d ' ')
+[ "$length" -le 72 ] || fail "header is $length characters (max 72)"
+
+second=$(printf '%s\n' "$message" | sed -n '2p')
+[ -z "$second" ] || fail "leave a blank line between the header and the body"

@@ -1,5 +1,7 @@
 # Android / Gradle
 *.apk
+# 공모전 제출용 릴리스 APK만 올린다 (apk/팀명_앱이름_release.apk)
+!apk/*_release.apk
 *.aab
 *.ap_
 *.dex
@@ -30,3 +32,7 @@ captures/
 
 # local data
 .data/
+
+# Python (tools/)
+__pycache__/
+*.pyc
