@@ -1,0 +1,105 @@
+package ai.reopt.djtrot.api
+
+import ai.reopt.djtrot.car.Destination
+import ai.reopt.djtrot.car.DriveContext
+import ai.reopt.djtrot.car.GearState
+import ai.reopt.djtrot.dj.toInput
+import java.time.LocalTime
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+/** DJ 트롯 서버와 주고받는 모양(`trot-song/1`, 브리프, 드라이브 노래)을 읽고 쓰는지. */
+class ContractTest {
+    private val json = DjTrotApi.json
+
+    @Test
+    fun readsTrotSongAndIgnoresUnknownKeys() {
+        val song = json.decodeFromString(
+            TrotSong.serializer(),
+            """
+            {"schema":"trot-song/1","id":"380faad4-0000-4000-8000-000000000001","title":"그 목소리","artist":"마스터트로트 악단",
+             "style":"ballad","topic":"love","voice":"female","labels":{"style":"트로트 발라드","topic":"사랑","voice":"여자 목소리"},
+             "durationSeconds":177.5,"audio":{"url":"https://cdn.example.com/songs/x.mp3","contentType":"audio/mpeg"},
+             "cover":null,"lyrics":{"title":"그 목소리","lines":["다 잊었다 큰소리쳤지"],"sections":{"verse":[0,1]}},
+             "lyricSync":{"state":"ready","lines":[{"text":"다 잊었다 큰소리쳤지","start":11.36,"end":18.34}]},
+             "provenance":{"kind":"house","createdAt":"2026-10-01","later":"added key"},"later":"added key"}
+            """.trimIndent(),
+        )
+        assertEquals("트로트 발라드", song.labels.style)
+        assertEquals(1, song.lyricSync.lines.size)
+        assertEquals("house", song.provenance.kind)
+    }
+
+    @Test
+    fun readsBriefWithoutVoice() {
+        val brief = json.decodeFromString(
+            DjBrief.serializer(),
+            """{"script":"대전까지 12분 남았네요.","song":{"topic":"mother","style":"ppongjjak","voice":"female","story":"청주에서 대전으로","title":"대전 가는 길"},"voiceUrl":null,"source":"template"}""",
+        )
+        assertNull(brief.voiceUrl)
+        assertEquals("mother", brief.song.topic)
+    }
+
+    @Test
+    fun driveInputKeepsOnlyTheContractKeysAndLimits() {
+        val drive = DriveContext(
+            drivingMode = "COMFORT",
+            currentAddress = "경기도 성남시 수정구 시흥동",
+            destination = Destination("가".repeat(120), remainMinutes = 12),
+        )
+        val input = drive.toInput(LocalTime.of(8, 5))
+        assertEquals("08:05", input.localTime)
+        assertNull(input.drivingMode)
+        assertEquals(80, input.destination!!.name.length)
+        val encoded = json.encodeToString(BriefRequest.serializer(), BriefRequest(input, voice = true))
+        // 🔴 서버 스키마가 strict — 모르는 키를 보내면 400이다. 값이 없는 키는 아예 보내지 않는다.
+        assertFalse("latitude" in encoded)
+        assertFalse("\"address\":null" in encoded)
+        assertTrue("\"spoken\":\"\"" in encoded)
+        assertTrue("\"gear\":\"UNKNOWN\"" in encoded)
+        assertFalse("moving" in encoded)
+    }
+
+    @Test
+    fun nowPlayingSendsSongIdOnlyForRequestedSongs() {
+        val input = DriveContext().toInput(LocalTime.NOON)
+        val house = json.encodeToString(BriefRequest.serializer(), BriefRequest(input, voice = false, NowPlaying("고향역", "마스터트로트 악단")))
+        // 🔴 서버 nowPlaying도 strict이고 songId는 uuid만 — 운영곡에는 키 자체를 보내지 않는다.
+        assertFalse("songId" in house)
+        val id = "14056dd5-375b-4c93-a20f-5e1f3b073819"
+        val made = json.encodeToString(BriefRequest.serializer(), BriefRequest(input, voice = false, NowPlaying("힘내라 오늘도", "DJ 트롯", id)))
+        assertTrue("\"songId\":\"$id\"" in made)
+    }
+
+    @Test
+    fun movingFollowsGearAndRestrictions() {
+        assertEquals(false, DriveContext(gear = GearState.PARK).toInput(LocalTime.NOON).moving)
+        assertEquals(true, DriveContext(gear = GearState.DRIVE, restricted = true).toInput(LocalTime.NOON).moving)
+        assertNull(DriveContext(gear = GearState.DRIVE).toInput(LocalTime.NOON).moving)
+        assertEquals("DRIVE", DriveContext(gear = GearState.DRIVE).toInput(LocalTime.NOON).gear)
+    }
+
+    @Test
+    fun tokenBalanceComesFromTheTokenBenefit() {
+        val snapshot = json.decodeFromString(
+            BenefitSnapshot.serializer(),
+            """{"checkedAt":"2026-10-23T00:00:00Z","benefits":[{"id":"token","title":"드라이브 제작 토큰","kind":"credits","balance":3,"adjustment":0}]}""",
+        )
+        assertEquals(3, snapshot.tokens)
+    }
+
+    @Test
+    fun driveSongAudioIsRelativeAndNeedsToken() {
+        val api = DjTrotApi("http://10.0.2.2:8790/api/v1/dj-trot/")
+        val drive = api.absolute("/api/v1/dj-trot/songs/f6fc176a-d620-43ec-a5dc-4cc7feec386e/audio")
+        assertEquals("http://10.0.2.2:8790/api/v1/dj-trot/songs/f6fc176a-d620-43ec-a5dc-4cc7feec386e/audio", drive)
+        assertTrue(api.needsToken(drive))
+        // 제공 목록은 공개 절대 주소 — 토큰을 붙이지 않는다.
+        val house = api.absolute("https://cdn.example.com/songs/x.mp3")
+        assertEquals("https://cdn.example.com/songs/x.mp3", house)
+        assertFalse(api.needsToken(house))
+    }
+}

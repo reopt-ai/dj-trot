@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- 🔴 Pleos Connect(AAOS) 전용 앱 -->
+    <uses-feature android:name="android.hardware.type.automotive" android:required="true" />
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+
+    <!-- AAOS 표준: 기어(GEAR_SELECTION) -->
+    <uses-permission android:name="android.car.permission.CAR_POWERTRAIN" />
+
+    <!-- Pleos SDK: 사용하는 도메인의 읽기 권한만 선언한다 -->
+    <!-- DrivingMode -->
+    <uses-permission android:name="pleos.car.permission.CAR_DRIVE" />
+    <!-- EvBattery·Fuel -->
+    <uses-permission android:name="pleos.car.permission.CAR_ENERGY" />
+    <!-- FusedLocation -->
+    <uses-permission android:name="pleos.car.permission.FUSED_LOCATION" />
+    <!-- NaviHelper 조회(get*Info) -->
+    <uses-permission android:name="pleos.car.permission.NAVI_ROUTE" />
+    <!-- TextToSpeech(DJ 목소리) -->
+    <uses-permission android:name="pleos.car.permission.TTS_SERVICE" />
+
+    <!-- 🔑 appCategory=audio: Pleos Music/Audio 카테고리 필수 선언 -->
+    <application
+        android:name=".DjTrotApp"
+        android:appCategory="audio"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.DjTrot">
+
+        <uses-library android:name="android.car" android:required="false" />
+
+        <meta-data
+            android:name="com.android.automotive"
+            android:resource="@xml/automotive_app_desc" />
+
+        <!-- 🔑 CCP(회전 조작기)는 사용자 설치 앱에 선택이다. 지원하지 않는다고 밝히고, 모든 조작을 터치로 끝낼 수 있게 둔다
+             (Pleos CCP Development Guide). 사전 탑재를 노리면 초점 이동을 붙이고 이 값을 지운다. -->
+        <meta-data android:name="com.hmg.rotary.ROTARY_SUPPORTED" android:value="false" />
+
+        <activity
+            android:name=".ui.MainActivity"
+            android:exported="true"
+            android:launchMode="singleTask">
+            <!-- 🔑 주행 중에도 열린다. 대신 화면이 CarUxRestrictions를 따라 스스로 제한한다(DjTrot DrivingRestrictions). -->
+            <meta-data android:name="distractionOptimized" android:value="true" />
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!-- 🔴 휴대폰 연결(PIN·QR) — distractionOptimized가 아니다. 주행 중에는 시스템이 막는다(QR 로그인은 모든 지역에서 주행 중 금지). -->
+        <activity
+            android:name=".ui.ConnectActivity"
+            android:exported="false"
+            android:label="휴대폰 연결" />
+
+        <!-- 🔑 Media3 MediaLibraryService — 시스템 미디어 센터·스티어링 휠·음성(Gleo) 검색이 이 서비스로 붙는다 -->
+        <service
+            android:name=".playback.DjTrotLibraryService"
+            android:exported="true"
+            android:foregroundServiceType="mediaPlayback">
+            <intent-filter>
+                <action android:name="androidx.media3.session.MediaLibraryService" />
+                <action android:name="android.media.browse.MediaBrowserService" />
+            </intent-filter>
+        </service>
+    </application>
+</manifest>
