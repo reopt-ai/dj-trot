@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 🔑 기기 자격은 이 차의 Keystore 키로만 풀린다(account/DeviceVault). 백업이나 기기 이전으로 옮겨도 쓸 수 없으니 뺀다. -->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="sharedpref" path="djtrot_device.xml" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="sharedpref" path="djtrot_device.xml" />
+    </device-transfer>
+</data-extraction-rules>
