@@ -5,6 +5,7 @@ import android.content.Context
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
+import androidx.core.content.edit
 import java.security.KeyStore
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
@@ -26,12 +27,13 @@ class DeviceVault(context: Context) {
         return DeviceCredential(id, secret)
     }
 
+    // 🔑 자격은 바로 디스크에 쓴다(commit). 페어링 직후 앱이 꺼져도 연결이 남아야 한다.
     fun write(device: DeviceCredential) {
-        prefs.edit().putString(KEY_ID, device.deviceId).putString(KEY_SECRET, seal(device.deviceSecret)).commit()
+        prefs.edit(commit = true) { putString(KEY_ID, device.deviceId).putString(KEY_SECRET, seal(device.deviceSecret)) }
     }
 
     fun clear() {
-        prefs.edit().clear().commit()
+        prefs.edit(commit = true) { remove(KEY_ID).remove(KEY_SECRET) }
     }
 
     private fun seal(plain: String): String {

@@ -227,7 +227,7 @@ val LocalCalm = compositionLocalOf { false }
 
 /** 재생 중 표시 — 금빛 막대 네 개. 멈추면 낮게 서고, 주행 중에는 움직이지 않는 모양으로 선다. */
 @Composable
-fun Equalizer(playing: Boolean, height: Dp, color: Color = DjColors.Gold, modifier: Modifier = Modifier) {
+fun Equalizer(playing: Boolean, height: Dp, modifier: Modifier = Modifier, color: Color = DjColors.Gold) {
     if (LocalCalm.current || !playing) {
         Bars(if (playing) listOf(0.55f, 1f, 0.75f, 0.4f) else List(4) { 0.25f }, height, color, modifier)
         return

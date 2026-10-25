@@ -12,6 +12,7 @@ import ai.reopt.djtrot.dj.SongOrders
 import ai.reopt.djtrot.dj.SongRequest
 import ai.reopt.djtrot.playback.Catalog
 import android.app.Application
+import androidx.core.content.edit
 import java.time.Duration
 import java.time.Instant
 import java.time.LocalTime
@@ -81,7 +82,7 @@ class DjTrotApp : Application() {
     /** DJ 멘트 켜기·끄기 — 기기에만 저장한다. */
     var djTalks: Boolean
         get() = getSharedPreferences(PREFS, MODE_PRIVATE).getBoolean(KEY_TALKS, true)
-        set(value) { getSharedPreferences(PREFS, MODE_PRIVATE).edit().putBoolean(KEY_TALKS, value).apply() }
+        set(value) { getSharedPreferences(PREFS, MODE_PRIVATE).edit { putBoolean(KEY_TALKS, value) } }
 
     private companion object {
         const val PREFS = "djtrot"

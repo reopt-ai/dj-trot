@@ -5,11 +5,13 @@ import ai.reopt.djtrot.api.CatalogResponse
 import ai.reopt.djtrot.api.DjTrotApi
 import ai.reopt.djtrot.api.LyricLine
 import ai.reopt.djtrot.api.TrotSong
-import android.net.Uri
 import android.os.Bundle
+import androidx.annotation.OptIn
+import androidx.core.net.toUri
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.MimeTypes
+import androidx.media3.common.util.UnstableApi
 import androidx.media3.session.MediaConstants
 import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.sync.Mutex
@@ -38,6 +40,7 @@ class Catalog(private val api: DjTrotApi, private val account: DeviceAccount) {
     fun root(): MediaItem = folder(ROOT, "DJ 트롯")
 
     /** 루트 힌트 — 폴더는 격자, 곡은 목록으로 보이게 하고 검색을 지원한다고 알린다. */
+    @OptIn(UnstableApi::class)
     fun rootExtras(): Bundle = Bundle().apply {
         putInt(MediaConstants.EXTRAS_KEY_CONTENT_STYLE_BROWSABLE, MediaConstants.EXTRAS_VALUE_CONTENT_STYLE_GRID_ITEM)
         putInt(MediaConstants.EXTRAS_KEY_CONTENT_STYLE_PLAYABLE, MediaConstants.EXTRAS_VALUE_CONTENT_STYLE_LIST_ITEM)
@@ -132,7 +135,7 @@ class Catalog(private val api: DjTrotApi, private val account: DeviceAccount) {
                 .setArtist(song.artist)
                 .setAlbumTitle(song.labels.style.ifBlank { "트로트" })
                 .setGenre("트로트")
-                .setArtworkUri(song.cover?.url?.let { Uri.parse(api.absolute(it)) })
+                .setArtworkUri(song.cover?.url?.let { api.absolute(it).toUri() })
                 .setDurationMs(song.durationSeconds?.let { (it * 1000).toLong() })
                 .setIsBrowsable(false)
                 .setIsPlayable(true)

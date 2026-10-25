@@ -75,6 +75,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -414,7 +415,7 @@ private fun StagePanel(view: Section, m: StageModel, player: Player?, modifier: 
             }
             if (live) {
                 Spacer(Modifier.height(24.dp))
-                Transport(m.ui, m.progress, player!!)
+                Transport(m.ui, m.progress, player)
             }
         }
     }
@@ -743,7 +744,7 @@ private fun CoverWithRecord(ui: PlayerUi) {
                 drawCircle(Brush.radialGradient(listOf(DjColors.Gold.copy(alpha = 0.26f), Color.Transparent)), radius = size.minDimension * 0.62f)
             },
         )
-        Vinyl(ui.playing, record, Modifier.align(Alignment.CenterStart).offset(x = (cover - record) / 2 + out))
+        Vinyl(ui.playing, record, Modifier.align(Alignment.CenterStart).offset { IntOffset(((cover - record) / 2 + out).roundToPx(), 0) })
         Cover(
             ui.artworkUri,
             ui.style,
