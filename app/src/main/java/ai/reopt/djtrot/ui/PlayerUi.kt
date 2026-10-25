@@ -28,9 +28,6 @@ data class PlayerUi(
     val hasItems: Boolean = false,
     val hasNext: Boolean = false,
     val hasPrevious: Boolean = false,
-    /** 대기열 안의 위치(1부터)와 전체 곡 수. */
-    val position: Int = 0,
-    val count: Int = 0,
     val nextSongId: String? = null,
     val nextTitle: String? = null,
     val nextSinger: String? = null,
@@ -57,8 +54,6 @@ private fun Player?.toUi(): PlayerUi {
         hasItems = player.mediaItemCount > 0,
         hasNext = player.hasNextMediaItem(),
         hasPrevious = player.hasPreviousMediaItem(),
-        position = if (player.mediaItemCount > 0) player.currentMediaItemIndex + 1 else 0,
-        count = player.mediaItemCount,
         nextSongId = next?.extras?.getString(Catalog.EXTRA_SONG_ID),
         nextTitle = next?.title?.toString(),
         nextSinger = next?.artist?.toString(),

@@ -424,11 +424,6 @@ private fun StagePanel(view: Section, m: StageModel, player: Player?, modifier: 
 @Composable
 private fun StageIdle(player: Player?, modifier: Modifier) {
     Column(modifier, verticalArrangement = Arrangement.Bottom) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            Icon(DjIcons.Sparkle, contentDescription = null, tint = DjColors.Gold, modifier = Modifier.size(32.dp))
-            Text("오늘의 드라이브 DJ", style = body(DjType.BodyS, DjColors.Gold, FontWeight.Bold))
-        }
-        Spacer(Modifier.height(18.dp))
         Text("이 길에 어울리는\n트로트를 틀어 드릴게요", style = headline(DjType.HeadlineL))
         Spacer(Modifier.height(16.dp))
         Text("곡 사이사이 DJ가 지금 지나는 동네와 남은 길을 이야기해요.", style = body(DjType.BodyS, DjColors.Muted))
@@ -456,12 +451,6 @@ private fun PlayView(m: StageModel, modifier: Modifier) {
             CoverWithRecord(ui)
             Spacer(Modifier.width(26.dp))
             Column(Modifier.weight(1f)) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                    Equalizer(ui.playing, height = 26.dp)
-                    Text("지금 무대", style = body(DjType.LabelM, DjColors.Gold, FontWeight.Bold))
-                    if (ui.count > 1) Text("${ui.position} / ${ui.count}", style = digits(DjType.LabelM, DjColors.Faint))
-                }
-                Spacer(Modifier.height(14.dp))
                 AnimatedContent(
                     targetState = ui.title.orEmpty(),
                     transitionSpec = { (fadeIn(tween(350)) + slideInVertically(tween(350)) { it / 4 }) togetherWith fadeOut(tween(200)) },
