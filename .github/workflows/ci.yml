@@ -1,0 +1,81 @@
+name: CI
+
+# 🔑 인프라 비용을 줄이려고 자동 실행은 꺼 두었다. 필요할 때 Actions 탭의 "Run workflow"로 돌린다.
+#    다시 켜려면 아래 push·pull_request 주석을 푼다.
+on:
+  workflow_dispatch:
+  # push:
+  #   branches: [main]
+  # pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  app:
+    name: Unit tests, lint, debug build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: 17
+
+      # Gradle wrapper jar를 검증하고 내려받은 의존성을 캐시한다.
+      - uses: gradle/actions/setup-gradle@v6
+
+      # GitHub Actions가 CI=true를 넣으므로 Kotlin 컴파일 경고도 실패가 된다(app/build.gradle.kts).
+      - name: Test, lint and assemble
+        run: ./gradlew :app:testDebugUnitTest :app:lintDebug :app:assembleDebug
+
+      - name: Upload reports
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: reports
+          path: |
+            app/build/reports/
+            app/build/test-results/
+          retention-days: 7
+
+  tools:
+    name: Mock server lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - run: pipx run ruff==0.17.2 check tools/
+
+  commits:
+    name: Commit messages
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      # 로컬에서 쓰는 훅(CONTRIBUTING.md)으로 커밋을 하나씩 검사한다. PR이면 PR의 커밋,
+      # 수동 실행이면 기본 브랜치에 아직 없는 커밋이다. Dependabot 커밋은 제목이 72자를 넘을 수 있어 건너뛴다.
+      - name: Check every commit not yet on the default branch
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || format('origin/{0}', github.event.repository.default_branch) }}
+          HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          status=0
+          for sha in $(git rev-list --no-merges "$BASE..$HEAD"); do
+            [ "$(git log -1 --format=%an "$sha")" = "dependabot[bot]" ] && continue
+            git log -1 --format=%B "$sha" > "$RUNNER_TEMP/message"
+            if ! .githooks/commit-msg "$RUNNER_TEMP/message"; then
+              echo "  in $(git log -1 --format='%h %s' "$sha")"
+              status=1
+            fi
+          done
+          exit "$status"
