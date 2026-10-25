@@ -44,13 +44,6 @@ class DeviceAccount(
         runCatching { token() }
     }
 
-    fun disconnect() {
-        vault.clear()
-        token = null
-        expiresAt = Instant.EPOCH
-        _connection.value = Connection.Disconnected
-    }
-
     /** 유효한 Bearer 토큰. 연결 전이면 null. */
     suspend fun token(): String? = lock.withLock {
         val device = vault.read() ?: return@withLock null.also { _connection.value = Connection.Disconnected }
@@ -88,9 +81,6 @@ class DeviceAccount(
             block(token() ?: throw NotConnected())
         }
     }
-
-    /** 토큰이 필요한 음원 요청용 — 재생 스레드에서 부른다. 이미 받아 둔 토큰만 돌려준다. */
-    fun cachedToken(): String? = token?.takeIf { Instant.now().isBefore(expiresAt) }
 
     class NotConnected : IllegalStateException("휴대폰과 연결되지 않았어요.")
 }

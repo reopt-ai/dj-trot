@@ -291,7 +291,7 @@ fun SongShelf(app: DjTrotApp, shelf: ShelfMemory, ui: PlayerUi, player: Player?,
                     state.items.isEmpty() && tab == ShelfTab.MINE -> EmptyShelf("아직 만든 노래가 없어요. 이 길의 신청곡을 만들어 보세요")
                     state.items.isEmpty() -> EmptyShelf("노래 목록을 준비하고 있어요. 곧 무대에 올라와요")
                     tab == ShelfTab.STYLES -> StyleGrid(state.items, ::play)
-                    else -> SongList(state.items, ui, ranked = false, onPlay = ::play)
+                    else -> SongList(state.items, ui, onPlay = ::play)
                 }
             }
         }
@@ -336,14 +336,14 @@ fun MadeSongs(app: DjTrotApp, ui: PlayerUi, player: Player?, modifier: Modifier)
             list == null -> Unit
             list.isEmpty() -> Text("아직 만든 노래가 없어요. 위 사연으로 첫 노래를 만들어 보세요", style = body(DjType.BodyS, DjColors.Muted), modifier = Modifier.padding(end = 14.dp))
             else -> Box(Modifier.weight(1f)) {
-                SongList(list, ui, ranked = false, fade = DjColors.Card) { playOrToggle(player, ui, it) }
+                SongList(list, ui, fade = DjColors.Card) { playOrToggle(player, ui, it) }
             }
         }
     }
 }
 
 @Composable
-private fun SongList(items: List<MediaItem>, ui: PlayerUi, ranked: Boolean, fade: Color = DjColors.Black, onPlay: (String) -> Unit) {
+private fun SongList(items: List<MediaItem>, ui: PlayerUi, fade: Color = DjColors.Black, onPlay: (String) -> Unit) {
     val list = rememberLazyListState()
     // 지금 곡이 목록 밖에 있으면 한 줄 위까지 보이게 굴린다.
     LaunchedEffect(ui.mediaId, items) {
@@ -356,8 +356,8 @@ private fun SongList(items: List<MediaItem>, ui: PlayerUi, ranked: Boolean, fade
     Box(Modifier.fillMaxSize()) {
         LazyColumn(Modifier.scrollbar(list), state = list, verticalArrangement = Arrangement.spacedBy(4.dp), contentPadding = PaddingValues(end = 18.dp, bottom = 60.dp)) {  // 오른쪽 18dp는 스크롤 막대 자리
             itemsIndexed(items, key = { _, item -> item.mediaId }) { index, item ->
-                SongRow(item, rank = if (ranked) index + 1 else null, current = item.mediaId == ui.mediaId, playing = ui.playing, onPlay = onPlay)
-                if (index < items.lastIndex) Box(Modifier.padding(start = if (ranked) 176.dp else 124.dp, end = 16.dp).fillMaxWidth().height(1.dp).background(DjColors.Line))
+                SongRow(item, current = item.mediaId == ui.mediaId, playing = ui.playing, onPlay = onPlay)
+                if (index < items.lastIndex) Box(Modifier.padding(start = 124.dp, end = 16.dp).fillMaxWidth().height(1.dp).background(DjColors.Line))
             }
         }
         // 목록이 아래로 이어진다는 표시 — 잘린 줄 대신 검정으로 스며든다.
@@ -372,7 +372,7 @@ private fun SongList(items: List<MediaItem>, ui: PlayerUi, ranked: Boolean, fade
  * 🔑 부제는 주제 · 장르. 제공 곡은 모두 같은 악단이라 가수 이름은 고르는 데 쓸모가 없다.
  */
 @Composable
-private fun SongRow(item: MediaItem, rank: Int?, current: Boolean, playing: Boolean, onPlay: (String) -> Unit) {
+private fun SongRow(item: MediaItem, current: Boolean, playing: Boolean, onPlay: (String) -> Unit) {
     val meta = item.mediaMetadata
     val style = meta.extras?.getString(Catalog.EXTRA_STYLE)
     val topic = meta.extras?.getString(Catalog.EXTRA_TOPIC_LABEL)
@@ -389,15 +389,6 @@ private fun SongRow(item: MediaItem, rank: Int?, current: Boolean, playing: Bool
             .padding(horizontal = 16.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        if (rank != null) {
-            Text(
-                "$rank",
-                style = digits(DjType.BodyL, if (rank <= 3) DjColors.Gold else DjColors.Faint).copy(fontWeight = FontWeight.ExtraBold),
-                textAlign = TextAlign.Center,
-                modifier = Modifier.width(40.dp),
-            )
-            Spacer(Modifier.width(12.dp))
-        }
         Cover(meta.artworkUri, style, size = 88.dp, radius = 16.dp, seed = meta.extras?.getString(Catalog.EXTRA_SONG_ID))
         Spacer(Modifier.width(20.dp))
         Column(Modifier.weight(1f)) {

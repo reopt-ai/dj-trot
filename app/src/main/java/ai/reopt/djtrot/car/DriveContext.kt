@@ -33,8 +33,6 @@ data class DriveContext(
     val uxFlags: Int = 0,
     /** 글 길이 제한이 걸렸을 때 한 덩어리 글의 최대 글자 수(CarUxRestrictions.getMaxRestrictedStringLength). */
     val maxTextLength: Int = 0,
-    /** 연결된 Pleos SDK 이름 — 화면에 연결 상태로 보여 준다. */
-    val connected: Set<String> = emptySet(),
 ) {
     val region: String? get() = Region.label(currentAddress ?: destination?.address)
 

@@ -39,7 +39,7 @@ class CarSignals(context: Context) {
     private val aaos = AaosCar(
         app,
         onRestrictions = { ux -> _state.update { it.copy(restricted = ux.required, uxFlags = ux.flags, maxTextLength = ux.maxTextLength) } },
-        onGear = { gear -> _state.update { it.copy(gear = gear, connected = it.connected + "AAOS") } },
+        onGear = { gear -> _state.update { it.copy(gear = gear) } },
     )
 
     private val drivingModeListener = object : DrivingModeStateListener {
@@ -74,6 +74,10 @@ class CarSignals(context: Context) {
         }
     }
 
+    /**
+     * 🔑 화면과 재생 서비스 중 먼저 뜬 쪽이 켜고, 프로세스가 사는 동안 끄지 않는다.
+     *    둘이 같은 신호를 함께 보므로 한쪽이 닫힐 때 끄면 다른 쪽의 DJ 멘트·주행 제한이 멈춘다.
+     */
     @Synchronized
     fun start() {
         if (started) return
@@ -104,37 +108,11 @@ class CarSignals(context: Context) {
         }
     }
 
-    @Synchronized
-    fun stop() {
-        if (!started) return
-        started = false
-        main.removeCallbacks(refresher)
-        aaos.stop()
-        vehicle?.let { car ->
-            runCatching { car.getDrivingMode().unregisterDrivingModeState(drivingModeListener) }
-            runCatching { car.getEvBattery().unregisterEvBatteryStateOfCharge(batteryListener) }
-            runCatching { car.release() }
-        }
-        navi?.let { helper ->
-            runCatching { helper.removeListener(naviListener) }
-            runCatching { helper.release() }
-        }
-        location?.let { fused ->
-            runCatching { fused.unregisterFusedLocationCallback(locationListener) }
-            runCatching { fused.release() }
-        }
-        vehicle = null
-        navi = null
-        location = null
-        _state.update { DriveContext() }
-    }
-
     private fun startVehicle() = runCatching {
         val car = Vehicle(app).also { it.initialize() }
         vehicle = car
         car.getDrivingMode().registerDrivingModeState(drivingModeListener)
         car.getEvBattery().registerEvBatteryStateOfCharge(batteryListener)
-        connected("Vehicle")
     }.onFailure { warn("Vehicle SDK", it) }
 
     private fun startNavi() = runCatching {
@@ -142,7 +120,6 @@ class CarSignals(context: Context) {
         navi = helper
         helper.initialize({
             helper.addListener(naviListener)
-            connected("NaviHelper")
             main.post { refresh() }
         }, { warn("NaviHelper SDK", it) })
     }.onFailure { warn("NaviHelper SDK", it) }
@@ -153,14 +130,11 @@ class CarSignals(context: Context) {
         fused.initialize()
         location = fused
         fused.registerFusedLocationCallback(locationListener)
-        connected("FusedLocation")
     }.onFailure { warn("FusedLocation SDK", it) }
 
     private fun refreshDestination() {
         navi?.let { runCatching { it.getDestinationInfo() } }
     }
-
-    private fun connected(name: String) = _state.update { it.copy(connected = it.connected + name) }
 
     private fun warn(what: String, error: Throwable) {
         Log.w(TAG, "$what 연결 실패: ${error.message}")

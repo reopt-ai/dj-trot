@@ -26,8 +26,6 @@ class AaosCar(
     data class UxState(val required: Boolean, val flags: Int, val maxTextLength: Int)
 
     private var car: Car? = null
-    private var ux: CarUxRestrictionsManager? = null
-    private var properties: CarPropertyManager? = null
 
     private val gearCallback = object : CarPropertyManager.CarPropertyEventCallback {
         override fun onChangeEvent(value: CarPropertyValue<*>) {
@@ -42,26 +40,14 @@ class AaosCar(
         car = connected
         runCatching {
             val manager = connected.getCarManager(Car.CAR_UX_RESTRICTION_SERVICE) as CarUxRestrictionsManager
-            ux = manager
             manager.currentCarUxRestrictions?.let { onRestrictions(it.toState()) }
             manager.registerListener { restrictions -> onRestrictions(restrictions.toState()) }
         }.onFailure { Log.w(TAG, "주행 제한 서비스를 쓸 수 없어요", it) }
         runCatching {
             val manager = connected.getCarManager(Car.PROPERTY_SERVICE) as CarPropertyManager
-            properties = manager
             @Suppress("DEPRECATION")
             manager.registerCallback(gearCallback, VehiclePropertyIds.GEAR_SELECTION, CarPropertyManager.SENSOR_RATE_ONCHANGE)
         }.onFailure { Log.w(TAG, "기어 속성을 읽을 수 없어요", it) }
-    }
-
-    fun stop() {
-        runCatching { ux?.unregisterListener() }
-        @Suppress("DEPRECATION")
-        runCatching { properties?.unregisterCallback(gearCallback) }
-        runCatching { car?.disconnect() }
-        ux = null
-        properties = null
-        car = null
     }
 
     private companion object {
