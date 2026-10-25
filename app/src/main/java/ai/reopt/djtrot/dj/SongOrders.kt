@@ -32,6 +32,8 @@ data class Order(
     val since: Long = 0L,
     /** 완성곡이 무대에 올랐는가. */
     val heard: Boolean = false,
+    /** 이 주문을 보낼 때 쓴 멱등 키. 서버 응답을 받지 못하고 실패했을 때만 남겨 다시 맡길 때 쓴다. */
+    val requestKey: String? = null,
 ) {
     val working: Boolean get() = state == "sending" || state == "queued" || state == "running"
 }
@@ -39,7 +41,8 @@ data class Order(
 /**
  * 드라이브 노래 주문 — `POST /songs`로 맡기고 5초마다 확인해, 완성되면 목록에 넣고 [ready]로 알린다.
  * 🔑 앱 범위에서 돈다 — 화면을 닫아도 작곡(약 2분)을 끝까지 지켜본다. 재생 서비스가 [ready]를 받아 다음 곡으로 넣는다.
- * 🔑 같은 주문은 같은 requestKey로 보낸다(멱등). 실패한 곡의 토큰은 서버가 돌려준다.
+ * 🔑 같은 주문은 같은 requestKey로 보낸다(멱등). 응답을 못 받고 실패한 주문을 다시 누르면 같은 키를 써서,
+ *    첫 요청이 서버에 닿았더라도 곡과 토큰이 두 번 쓰이지 않는다. 만들다 실패한 곡의 토큰은 서버가 돌려준다.
  */
 class SongOrders(
     private val api: DjTrotApi,
@@ -67,14 +70,14 @@ class SongOrders(
 
     fun create(request: SongRequest, drive: DriveInput) {
         if (_current.value?.working == true) return
-        val key = UUID.randomUUID().toString()
+        val key = retryKey(_current.value, request) ?: UUID.randomUUID().toString()
         val since = SystemClock.elapsedRealtime()
-        _current.value = Order(request, "sending", since = since)
+        _current.value = Order(request, "sending", since = since, requestKey = key)
         watching?.cancel()
         watching = scope.launch {
             val body = CreateSong(key, request.topic, request.style, request.voice, request.story.take(StoryBuilder.MAX_STORY), drive)
             val created = runCatching { account.authorized { api.createSong(it, body) } }
-                .getOrElse { error -> return@launch fail(request, error) }
+                .getOrElse { error -> return@launch fail(request, key, error) }
             _current.value = Order(request, created.state, created.id, since = since)
             refreshTokens()
             var song = created
@@ -107,13 +110,18 @@ class SongOrders(
         if (_current.value?.working == false) _current.value = null
     }
 
-    private fun fail(request: SongRequest, error: Throwable) {
-        _current.value = Order(request, "failed", problem = message(error))
+    private fun fail(request: SongRequest, key: String, error: Throwable) {
+        // 서버가 답한 실패(토큰 부족 등)는 새 키로 다시 맡긴다. 같은 키면 같은 실패를 돌려받을 수 있다.
+        _current.value = Order(request, "failed", problem = message(error), requestKey = key.takeIf { error !is DjTrotApiException })
         refreshTokens()
     }
 
     companion object {
         private const val POLL_MS = 5_000L
+
+        /** 다시 맡길 때 쓸 키. 같은 주문이 서버 응답 전에 실패했으면 그 키, 아니면 null(새 키). */
+        fun retryKey(previous: Order?, request: SongRequest): String? =
+            previous?.takeIf { it.state == "failed" && it.songId == null && it.request == request }?.requestKey
 
         fun message(error: Throwable): String = when {
             error is DeviceAccount.NotConnected -> "휴대폰을 먼저 연결해 주세요."
