@@ -58,7 +58,7 @@ class Catalog:
         try:
             choices = fetch_json(self.upstream + PREFIX + "/config", 5)["choices"]
             return {group: {item["id"]: item["label"] for item in items} for group, items in choices.items()}
-        except Exception:
+        except (OSError, ValueError, KeyError, TypeError, AttributeError):
             return FALLBACK_LABELS
 
     def load(self):
@@ -84,13 +84,13 @@ class Catalog:
             def sync(song):
                 try:
                     return fetch_json(f"{self.stage}/stage/songs/{song['id']}/lyric-sync", 10)
-                except Exception:
+                except (OSError, ValueError):
                     return {"state": "missing", "lines": []}
 
             with ThreadPoolExecutor(8) as pool:
                 syncs = list(pool.map(sync, picked))
             self.songs = [self.convert(song, sync, labels) for song, sync in zip(picked, syncs)]
-            sys.stderr.write("catalog: %d songs\n" % len(self.songs))
+            sys.stderr.write(f"catalog: {len(self.songs)} songs\n")
             return self.songs
 
     @staticmethod
@@ -134,7 +134,7 @@ def make_handler(upstream, files, catalog, fake_seconds):
         protocol_version = "HTTP/1.1"
 
         def log_message(self, fmt, *args):
-            sys.stderr.write("%s %s\n" % (self.command, fmt % args))
+            sys.stderr.write(f"{self.command} {fmt % args}\n")
 
         def origin(self):
             return "http://" + self.headers.get("Host", "127.0.0.1:8790")
@@ -190,7 +190,7 @@ def make_handler(upstream, files, catalog, fake_seconds):
             body = json.loads(self.rfile.read(length) or b"{}")
             song_id = "fake-" + hashlib.sha256(body.get("requestKey", "").encode()).hexdigest()[:12]
             orders.setdefault(song_id, (time.monotonic(), {k: body.get(k, "") for k in ("topic", "style", "voice", "story")}))
-            sys.stderr.write("fake order %s: %s\n" % (song_id, orders[song_id][1]["story"]))
+            sys.stderr.write(f"fake order {song_id}: {orders[song_id][1]['story']}\n")
             return self.json(self.fake_state(song_id), status=201)
 
         def fake_state(self, song_id):
@@ -255,7 +255,7 @@ def make_handler(upstream, files, catalog, fake_seconds):
             self.send_header("Accept-Ranges", "bytes")
             self.send_header("Content-Length", str(end - start + 1))
             if status == 206:
-                self.send_header("Content-Range", "bytes %d-%d/%d" % (start, end, size))
+                self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
             self.end_headers()
             if head:
                 return
@@ -296,9 +296,9 @@ def main():
     if not files:
         sys.exit("MP3 파일이 없어요: " + args.audio_dir)
     server = ThreadingHTTPServer((args.host, args.port), make_handler(args.upstream.rstrip("/"), files, Catalog(args.upstream.rstrip("/"), args.stage.rstrip("/"), set(args.skip_artist)), args.fake_songs))
-    print("DJ 트롯 목 서버 http://%s:%d%s → 제공 목록·음원은 흉내, 나머지는 %s" % (args.host, args.port, PREFIX, args.upstream), flush=True)
+    print(f"DJ 트롯 목 서버 http://{args.host}:{args.port}{PREFIX} → 제공 목록·음원은 흉내, 나머지는 {args.upstream}", flush=True)
     if args.fake_songs:
-        print("노래 만들기는 흉내: 서버로 보내지 않고 %d초 뒤 이미 만든 노래로 완성" % args.fake_songs, flush=True)
+        print(f"노래 만들기는 흉내: 서버로 보내지 않고 {args.fake_songs}초 뒤 이미 만든 노래로 완성", flush=True)
     server.serve_forever()
 
 
