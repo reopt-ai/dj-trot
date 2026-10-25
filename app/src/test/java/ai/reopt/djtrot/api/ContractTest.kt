@@ -15,8 +15,7 @@ import org.junit.Test
 class ContractTest {
     private val json = DjTrotApi.json
 
-    @Test
-    fun readsTrotSongAndIgnoresUnknownKeys() {
+    @Test fun `노래 모양을 읽고 모르는 키는 무시한다`() {
         val song = json.decodeFromString(
             TrotSong.serializer(),
             """
@@ -33,8 +32,7 @@ class ContractTest {
         assertEquals("house", song.provenance.kind)
     }
 
-    @Test
-    fun readsBriefWithoutVoice() {
+    @Test fun `음성 없는 DJ 브리프도 읽는다`() {
         val brief = json.decodeFromString(
             DjBrief.serializer(),
             """{"script":"대전까지 12분 남았네요.","song":{"topic":"mother","style":"ppongjjak","voice":"female","story":"청주에서 대전으로","title":"대전 가는 길"},"voiceUrl":null,"source":"template"}""",
@@ -43,8 +41,7 @@ class ContractTest {
         assertEquals("mother", brief.song.topic)
     }
 
-    @Test
-    fun driveInputKeepsOnlyTheContractKeysAndLimits() {
+    @Test fun `주행 정보는 계약된 키와 길이만 보낸다`() {
         val drive = DriveContext(
             drivingMode = "COMFORT",
             currentAddress = "경기도 성남시 수정구 시흥동",
@@ -63,8 +60,7 @@ class ContractTest {
         assertFalse("moving" in encoded)
     }
 
-    @Test
-    fun nowPlayingSendsSongIdOnlyForRequestedSongs() {
+    @Test fun `지금 곡의 ID는 신청곡일 때만 보낸다`() {
         val input = DriveContext().toInput(LocalTime.NOON)
         val house = json.encodeToString(BriefRequest.serializer(), BriefRequest(input, voice = false, NowPlaying("고향역", "마스터트로트 악단")))
         // 🔴 서버 nowPlaying도 strict이고 songId는 uuid만 — 운영곡에는 키 자체를 보내지 않는다.
@@ -74,16 +70,14 @@ class ContractTest {
         assertTrue("\"songId\":\"$id\"" in made)
     }
 
-    @Test
-    fun movingFollowsGearAndRestrictions() {
+    @Test fun `달리는 중인지는 기어와 주행 제한으로 정한다`() {
         assertEquals(false, DriveContext(gear = GearState.PARK).toInput(LocalTime.NOON).moving)
         assertEquals(true, DriveContext(gear = GearState.DRIVE, restricted = true).toInput(LocalTime.NOON).moving)
         assertNull(DriveContext(gear = GearState.DRIVE).toInput(LocalTime.NOON).moving)
         assertEquals("DRIVE", DriveContext(gear = GearState.DRIVE).toInput(LocalTime.NOON).gear)
     }
 
-    @Test
-    fun tokenBalanceComesFromTheTokenBenefit() {
+    @Test fun `토큰 잔액은 토큰 혜택에서 읽는다`() {
         val snapshot = json.decodeFromString(
             BenefitSnapshot.serializer(),
             """{"checkedAt":"2026-10-23T00:00:00Z","benefits":[{"id":"token","title":"드라이브 제작 토큰","kind":"credits","balance":3,"adjustment":0}]}""",
@@ -91,8 +85,7 @@ class ContractTest {
         assertEquals(3, snapshot.tokens)
     }
 
-    @Test
-    fun driveSongAudioIsRelativeAndNeedsToken() {
+    @Test fun `드라이브 노래 음원은 상대 주소이고 토큰이 필요하다`() {
         val api = DjTrotApi("http://10.0.2.2:8790/api/v1/dj-trot/")
         val drive = api.absolute("/api/v1/dj-trot/songs/f6fc176a-d620-43ec-a5dc-4cc7feec386e/audio")
         assertEquals("http://10.0.2.2:8790/api/v1/dj-trot/songs/f6fc176a-d620-43ec-a5dc-4cc7feec386e/audio", drive)

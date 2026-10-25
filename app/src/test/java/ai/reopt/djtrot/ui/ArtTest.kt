@@ -6,19 +6,16 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ArtTest {
-    @Test
-    fun balladMoodsShareOneFamily() {
+    @Test fun `발라드 계열은 같은 그림 묶음을 쓴다`() {
         assertEquals("ballad", Art.family("ballad-calm"))
         assertEquals(Art.cover("ballad"), Art.cover("ballad-calm"))
     }
 
-    @Test
-    fun unknownStyleFallsBackToTheConcertHall() {
+    @Test fun `모르는 장르는 공연장 그림으로 대신한다`() {
         assertEquals(Art.stage(null), Art.stage("unknown"))
     }
 
-    @Test
-    fun eachSongGetsItsOwnSteadyLook() {
+    @Test fun `곡마다 표지가 다르고 늘 같다`() {
         val ids = (1..12).map { "380faad4-0000-4000-8000-0000000000%02d".format(it) }
         val looks = ids.map(Art::look)
         assertEquals(looks, ids.map(Art::look))
