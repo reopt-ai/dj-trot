@@ -4,8 +4,10 @@
 
 DJ 트롯은 현대자동차그룹 차량 인포테인먼트 [Pleos Connect](https://document.pleos.ai/)(Android Automotive OS 기반)에서 동작하는 음악 앱입니다. 차가 아는 목적지, 지나는 동네, 시간대, 주차·주행 상태로 DJ가 곡 사이에 이야기를 건네고, 운전자가 원하면 지금 이 길의 사연으로 새 트로트를 만들어 다음 곡으로 들려줍니다.
 
+AI 트로트 서비스 **마스터트롯**의 차량용 앱이라, 휴대폰 연결은 마스터트롯 계정으로 합니다.
+
 <p align="center">
-  <img src="docs/images/stage.jpg" alt="넓은 창의 무대 화면. 방금 만든 신청곡이 가사 자막과 함께 재생되고, 오른쪽에 이 길의 신청곡 카드와 노래 목록이 있다" width="100%">
+  <img src="docs/images/stage.jpg" alt="넓은 창의 무대 화면. 사연으로 만든 신청곡이 가사 자막과 함께 재생되고, 오른쪽에 DJ가 제안한 이 길의 신청곡과 추천곡 목록이 있다" width="100%">
 </p>
 <p align="center">
   <img src="docs/images/dj.jpg" alt="DJ 칸. 방금 DJ가 한 말, DJ가 아는 이 드라이브(지역·주차·배터리), 앞서 한 말" width="66%">
@@ -58,7 +60,7 @@ sequenceDiagram
 | --- | --- | --- |
 | Pleos **NaviHelper** | 현재 주소, 목적지, 남은 시간. DJ 멘트와 사연의 재료 | `car/CarSignals.kt` |
 | Pleos **Vehicle** | 배터리 잔량, 주행 모드 | `car/CarSignals.kt` |
-| Pleos **FusedLocation** | 현재 위치 좌표(기기 안에서만 씀) | `car/CarSignals.kt` |
+| Pleos **FusedLocation** | 현재 위치 좌표. 받아서 기기 안에만 둡니다([알려진 제한](#알려진-제한)) | `car/CarSignals.kt` |
 | Pleos **TextToSpeech** | DJ 목소리. 쓸 수 없으면 안드로이드 TTS로 바꿈 | `dj/DjVoice.kt` |
 | AAOS **CarUxRestrictions** | 주행 중 화면 제한 | `car/AaosCar.kt` |
 | AAOS **GEAR_SELECTION** | 주차·주행 판단 | `car/AaosCar.kt` |
@@ -94,10 +96,11 @@ DJ 멘트와 신청곡 제안을 위해 아래 값만 보냅니다(`api/Models.k
 | 목적지 이름·주소, 남은 시간(분) | 부산역, 42 |
 | 현재 주소(동 단위)와 지역 이름 | 경기도 성남시 수정구 시흥동, 성남 |
 | 현지 시각 | 21:30 |
+| 말로 넣은 사연(음성 입력 전까지는 빈 문자열) | "" |
 | 주행 모드, 기어, 달리는 중인지 | NORMAL, PARK, false |
 | 지금 트는 곡 제목·가수, 내가 만든 노래면 그 노래의 ID | 힘내라 오늘도 |
 
-**DJ 브리프 요청에는 위치 좌표와 차량·계정 식별 정보가 들어가지 않습니다.** 서버가 모르는 키를 받으면 요청을 거절하므로, 값이 없는 키는 보내지 않는다는 점까지 단위 테스트(`ContractTest`)로 지킵니다.
+**DJ 브리프 요청에는 위치 좌표와 차량·계정 식별 정보가 들어가지 않습니다.** 서버가 모르는 키를 받으면 요청을 거절하므로, 값이 null인 키는 보내지 않는다는 점까지 단위 테스트(`ContractTest`)로 지킵니다.
 
 ## 시작하기
 
@@ -165,7 +168,7 @@ Android Studio 없이 설치하는 방법입니다. 공식 안내는 [Pleos 문�
 
 ### 목 서버로 시험하기
 
-`tools/mock_djtrot.py`는 개발용 목 서버입니다. 제공 목록과 음원은 흉내 내고, 나머지 요청은 `--upstream`의 DJ 트롯 서버로 넘깁니다. 파이썬 표준 라이브러리만 씁니다.
+`tools/mock_djtrot.py`는 개발용 목 서버입니다. 제공 목록은 마스터트롯 공개 무대 API(`--stage`)의 곡과 가사 시각으로 만들고, 음원은 `--audio-dir`의 MP3로 대신합니다. 나머지 요청은 `--upstream`의 DJ 트롯 서버로 넘깁니다. 파이썬 표준 라이브러리만 씁니다.
 
 ```bash
 uv run --no-project tools/mock_djtrot.py --audio-dir ~/Music/trot --upstream http://127.0.0.1:8787
@@ -177,8 +180,17 @@ uv run --no-project tools/mock_djtrot.py --audio-dir ~/Music/trot --upstream htt
 ## 테스트
 
 ```bash
-./gradlew :app:testDebugUnitTest
+./gradlew :app:testDebugUnitTest   # JVM 단위 테스트
+./gradlew :app:lintDebug            # Android lint. 경고가 하나라도 있으면 실패
 ```
+
+GitHub Actions 워크플로(`.github/workflows/ci.yml`)가 단위 테스트, lint, 디버그 빌드, 목 서버 검사, 커밋 메시지 검사를 한 번에 돌립니다. 인프라 비용을 줄이려고 자동 실행은 꺼 두었고, 필요할 때 Actions 탭에서 수동으로 돌립니다. 평소에는 아래 명령으로 같은 검사를 로컬에서 합니다. `CI=true`를 주면 CI처럼 Kotlin 컴파일 경고도 실패로 봅니다.
+
+```bash
+CI=true ./gradlew :app:testDebugUnitTest :app:lintDebug :app:assembleDebug
+```
+
+lint에서 일부러 남기는 항목은 `app/lint.xml`에 이유와 함께 적습니다.
 
 JVM 단위 테스트가 차량·서버 없이 도는 규칙을 검사합니다.
 
@@ -205,11 +217,15 @@ app/src/main/java/ai/reopt/djtrot/
 └── ui/              화면: 무대(DjScreen), 신청곡·노래 목록(Shelf), 휴대폰 연결(ConnectActivity), 공통 부품
 app/src/test/        JVM 단위 테스트
 tools/mock_djtrot.py 개발용 목 서버
-docs/                공모전·Pleos 요건 정리, README 이미지
+docs/                구조 설명, 공모전·Pleos 요건 정리, README 이미지
+.github/             CI(수동 실행), Dependabot, 이슈·PR 템플릿
 ```
+
+상태가 어디에 있고 곡이 바뀔 때 무슨 일이 일어나는지, 왜 그렇게 짰는지는 [docs/architecture.md](docs/architecture.md)에 있습니다.
 
 ## 알려진 제한
 
+- **위치 좌표는 아직 쓰지 않음**: FusedLocation 좌표를 받지만 DJ 멘트와 사연은 내비게이션 주소로 만듭니다. 좌표는 서버로 보내지 않습니다.
 - **운영 서버 준비 중**: 기본 빌드가 보는 운영 서버 주소는 아직 열리지 않았습니다(2026-10). 그동안은 `-Pdjtrot.api`로 개발 서버를 지정합니다.
 - **에뮬레이터에서 DJ 목소리가 나지 않음**: 에뮬레이터의 Pleos TTS 온디바이스 엔진이 `ON_DEVICE_ENGINE_ERROR`를 냅니다. 안드로이드 TTS도 같은 음성 서비스를 써서 소리가 나지 않습니다. 자막은 정상으로 나오고, Client ID/Secret을 넣으면 서버 모드로 말합니다.
 - **주행 모드 값 없음(에뮬레이터)**: 에뮬레이터가 DrivingMode 속성을 지원하지 않아 화면에서 생략합니다.
@@ -231,3 +247,9 @@ docs/                공모전·Pleos 요건 정리, README 이미지
 ```bash
 git config core.hooksPath .githooks
 ```
+
+보안 문제를 알리는 방법과 비밀값이 새었을 때 할 일은 [SECURITY.md](SECURITY.md)에 있습니다.
+
+## 라이선스
+
+비공개 저장소입니다. 코드와 이미지의 권리는 reopt Inc.에 있으며, 허락 없이 복제하거나 배포할 수 없습니다. Pleos SDK와 Pleos Connect Emulator 이미지는 42dot의 라이선스를 따릅니다. 화면 아이콘 일부는 Google [Material Symbols](https://github.com/google/material-design-icons)(Apache License 2.0)의 도형을 옮겨 썼습니다.

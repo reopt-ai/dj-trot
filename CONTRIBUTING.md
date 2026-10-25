@@ -8,13 +8,15 @@ DJ 트롯에 손을 보태 주셔서 고맙습니다. 이 문서는 작업 방�
 git config core.hooksPath .githooks   # 커밋 메시지 검사를 켠다
 ```
 
-`.githooks/commit-msg`가 커밋할 때마다 첫 줄을 검사하고, 규칙에 맞지 않으면 이유를 알려 주며 커밋을 멈춥니다.
+`.githooks/commit-msg`가 커밋할 때마다 첫 줄을 검사하고, 규칙에 맞지 않으면 이유를 알려 주며 커밋을 멈춥니다. 들여쓰기, 줄바꿈 문자, 인코딩은 `.editorconfig`를 따르니 편집기의 EditorConfig 지원을 켜 둡니다.
 
 ## 브랜치와 PR
 
 - `main`은 언제나 빌드되고 단위 테스트가 통과하는 상태로 둡니다.
 - 작업은 `feat/<주제>`, `fix/<주제>`처럼 커밋 type을 앞에 붙인 브랜치에서 하고 PR로 합칩니다.
-- PR에는 무엇을, 왜 바꿨는지와 어떻게 확인했는지를 적습니다. 화면을 바꿨다면 에뮬레이터 스크린샷을 붙입니다(넓은 창·좁은 창, 주행 중 화면이 달라지면 그것도).
+- PR에는 무엇을, 왜 바꿨는지와 어떻게 확인했는지를 적습니다. 화면을 바꿨다면 에뮬레이터 스크린샷을 붙입니다(넓은 창·좁은 창, 주행 중 화면이 달라지면 그것도). PR 템플릿이 확인할 항목을 보여 줍니다.
+- CI는 비용을 줄이려고 자동 실행을 꺼 두었습니다. PR을 열기 전에 `CI=true ./gradlew :app:testDebugUnitTest :app:lintDebug :app:assembleDebug`가 통과하는지 로컬에서 확인합니다. 큰 변경은 Actions 탭에서 CI를 수동으로 한 번 돌립니다.
+- 의존성 업데이트는 Dependabot이 매주 묶어서 PR로 엽니다. 메시지는 `build(deps): …`, `ci(deps): …` 모양입니다.
 
 ## 커밋 메시지
 
@@ -86,12 +88,13 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 
 ### 커밋 하나에 변경 하나
 
-- 커밋마다 `./gradlew :app:testDebugUnitTest`가 통과해야 합니다.
+- 커밋마다 `./gradlew :app:testDebugUnitTest :app:lintDebug`가 통과해야 합니다.
 - 기능 추가와 리팩터링, 포맷 정리를 한 커밋에 섞지 않습니다.
 
 ## 코드 규칙
 
 - Kotlin 공식 스타일(`kotlin.code.style=official`)을 따릅니다.
+- Android lint 경고는 고칩니다. 꼭 남겨야 하는 항목은 `app/lint.xml`에 이유와 함께 적습니다. `CI=true`로 빌드하면 Kotlin 컴파일 경고도 실패입니다.
 - 주석, 문서, 화면 문구는 한국어로 쓰고 식별자와 커밋 메시지는 영어로 씁니다.
 - 주석 표기: 🔑 핵심 결정, 🔴 어기면 사고가 나는 규칙(Pleos 요건, 운전 안전), ⚠️ 주의.
 - 화면 글자 크기는 Pleos 단계를 옮긴 `DjType`만 씁니다. 글자와 배경의 대비는 4.5:1 이상을 지킵니다.
