@@ -1,6 +1,6 @@
-# CLAUDE.md
+# AGENTS.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+이 저장소에서 일하는 코딩 에이전트를 위한 안내입니다.
 
 DJ 트롯은 Pleos Connect(Android Automotive OS)용 음악 앱입니다. 저장소에는 차량 클라이언트만 있고 서버는 따로 있습니다. 사람이 읽는 안내는 [README.md](README.md), 작업 규칙은 [CONTRIBUTING.md](CONTRIBUTING.md)가 정본입니다.
 
