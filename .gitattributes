@@ -1,0 +1,10 @@
+* text=auto eol=lf
+
+# Gradle wrapper: 유닉스 스크립트는 LF, 윈도 스크립트는 CRLF여야 한다.
+/gradlew text eol=lf
+*.bat text eol=crlf
+
+*.jar binary
+*.jpg binary
+*.png binary
+*.webp binary
