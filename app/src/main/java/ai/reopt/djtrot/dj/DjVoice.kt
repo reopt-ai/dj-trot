@@ -23,9 +23,9 @@ interface DjVoice {
 }
 
 /**
- * 🔑 Pleos TTS(온디바이스 모드 — 앱 등록·네트워크 없이 동작)를 먼저 쓰고, 초기화나 엔진이 실패하면 안드로이드 TTS로 바꾼다.
+ * 🔑 Pleos TTS를 먼저 쓰고, 초기화나 엔진이 실패하면 안드로이드 TTS로 바꾼다.
+ *    Pleos Playground Client ID/Secret이 빌드에 있으면 하이브리드(서버 우선, 실패 시 온디바이스), 없으면 온디바이스 모드다.
  *    엔진 실패(ON_DEVICE_ENGINE_ERROR 등)는 말하는 도중에 온다 — 그때도 바꾸고 방금 멘트를 다시 읽는다.
- *    서버/하이브리드 모드는 Pleos Playground 프로젝트의 Client ID/Secret 등록 뒤에 켠다.
  */
 class FallbackDjVoice(context: Context) : DjVoice {
     private val app = context.applicationContext
