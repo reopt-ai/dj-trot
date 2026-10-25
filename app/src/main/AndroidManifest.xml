@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <!-- 🔴 Pleos Connect(AAOS) 전용 앱 -->
     <uses-feature android:name="android.hardware.type.automotive" android:required="true" />
@@ -61,11 +62,13 @@
             android:exported="false"
             android:label="휴대폰 연결" />
 
-        <!-- 🔑 Media3 MediaLibraryService — 시스템 미디어 센터·스티어링 휠·음성(Gleo) 검색이 이 서비스로 붙는다 -->
+        <!-- 🔑 Media3 MediaLibraryService — 시스템 미디어 센터·스티어링 휠·음성(Gleo) 검색이 이 서비스로 붙는다.
+             권한 없이 열어 두는 것이 미디어 앱의 표준이다. 연결은 MediaSession이 컨트롤러별로 받는다. -->
         <service
             android:name=".playback.DjTrotLibraryService"
             android:exported="true"
-            android:foregroundServiceType="mediaPlayback">
+            android:foregroundServiceType="mediaPlayback"
+            tools:ignore="ExportedService">
             <intent-filter>
                 <action android:name="androidx.media3.session.MediaLibraryService" />
                 <action android:name="android.media.browse.MediaBrowserService" />

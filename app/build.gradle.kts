@@ -45,6 +45,19 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
+
+    lint {
+        // 경고도 실패로 본다. 일부러 남기는 항목은 lint.xml에 이유와 함께 적는다.
+        warningsAsErrors = true
+        lintConfig = file("lint.xml")
+    }
+}
+
+kotlin {
+    compilerOptions {
+        // CI에서는 컴파일 경고도 실패로 본다. 로컬에서는 경고로만 보여 작업 흐름을 끊지 않는다.
+        allWarningsAsErrors = providers.environmentVariable("CI").isPresent
+    }
 }
 
 dependencies {

@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 일부러 남기는 lint 항목. 항목마다 이유를 적는다. -->
+<lint>
+    <!-- 🔴 Pleos Connect 차량과 에뮬레이터는 Android 14(API 34)다. targetSdk를 올리면 차에 없는 플랫폼 동작을 따르게 된다. -->
+    <issue id="OldTargetApi" severity="ignore" />
+
+    <!-- ⚠️ 적응형 아이콘을 버전 없는 mipmap-anydpi로 옮기면 AGP 9.4 리소스 병합에서 아이콘이 빠져 빌드가 실패한다. -v26 폴더를 그대로 둔다. -->
+    <issue id="ObsoleteSdkInt">
+        <ignore path="src/main/res/mipmap-anydpi-v26" />
+    </issue>
+
+    <!-- Pleos TextToSpeech SDK가 가져오는 JNA의 x86_64 네이티브 라이브러리. 차와 에뮬레이터는 arm64라 이 파일은 쓰이지 않는다. -->
+    <issue id="Aligned16KB">
+        <ignore regexp="net\.java\.dev\.jna" />
+    </issue>
+</lint>
