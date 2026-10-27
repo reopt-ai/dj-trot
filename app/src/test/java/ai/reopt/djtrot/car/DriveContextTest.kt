@@ -16,6 +16,12 @@ class DriveContextTest {
         assertEquals("짧은 말", limited.brief("짧은 말"))
     }
 
+    @Test fun `안내 음성 직전이나 방향지시등이 켜지면 DJ가 말을 미룬다`() {
+        assertFalse(DriveContext().holdTalk)
+        assertTrue(DriveContext(guidanceSoon = true).holdTalk)
+        assertTrue(DriveContext(signaling = true).holdTalk)
+    }
+
     @Test fun `설정 금지는 주행 제한 중에만 걸린다`() {
         assertTrue(DriveContext(gear = GearState.DRIVE, restricted = true, uxFlags = 64 or 8).noSetup)
         assertFalse(DriveContext(gear = GearState.PARK, restricted = false, uxFlags = 64).noSetup)

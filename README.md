@@ -58,10 +58,9 @@ sequenceDiagram
 
 | SDK / API | 이 앱에서 하는 일 | 코드 |
 | --- | --- | --- |
-| Pleos **NaviHelper** | 현재 주소, 목적지, 남은 시간. DJ 멘트와 사연의 재료 | `car/CarSignals.kt` |
-| Pleos **Vehicle** | 배터리 잔량, 주행 모드 | `car/CarSignals.kt` |
-| Pleos **FusedLocation** | 현재 위치 좌표. 받아서 기기 안에만 둡니다([알려진 제한](#알려진-제한)) | `car/CarSignals.kt` |
-| Pleos **TextToSpeech** | DJ 목소리. 쓸 수 없으면 안드로이드 TTS로 바꿈 | `dj/DjVoice.kt` |
+| Pleos **NaviHelper** | 현재 주소, 목적지, 남은 시간. DJ 멘트와 사연의 재료. 회전·주의 구간·단속 카메라 안내 직전에는 DJ가 말을 미루고, 도착하면 걸린 시간과 거리로 마무리 인사 | `car/CarSignals.kt` |
+| Pleos **Vehicle** | 배터리 잔량, 주행 모드. 방향지시등이 켜진 동안 DJ가 말을 미룸 | `car/CarSignals.kt` |
+| Pleos **TextToSpeech** | DJ 목소리. 말하는 동안 음악을 줄이고, 쓸 수 없으면 안드로이드 TTS로 바꿈 | `dj/DjVoice.kt` |
 | AAOS **CarUxRestrictions** | 주행 중 화면 제한 | `car/AaosCar.kt` |
 | AAOS **GEAR_SELECTION** | 주차·주행 판단 | `car/AaosCar.kt` |
 | Media3 **MediaLibraryService** | 시스템 미디어, 스티어링 휠, 음성 검색 연결 | `playback/DjTrotLibraryService.kt` |
@@ -77,8 +76,8 @@ SDK마다 따로 실패할 수 있어서(차종, 에뮬레이터, 권한) 하나
 | `appCategory="audio"` | `AndroidManifest.xml`에 선언 |
 | MediaLibraryService + MediaSession | `DjTrotLibraryService`가 재생, 브라우즈 트리(추천·새 노래·장르·내 노래), 검색을 제공 |
 | 스티어링 휠 제어 | MediaSession 표준 명령으로 재생·일시정지·이전·다음 |
-| 음성 검색(Gleo) | `onSearch`, `onGetSearchResult`, 검색어로 재생(`onAddMediaItems`) |
-| 오디오 포커스 | ExoPlayer가 포커스를 관리하고, 영구 손실이면 재생을 멈춰 포커스를 돌려줌 |
+| 음성 검색 | Media3 표준 `onSearch`, `onGetSearchResult`, 검색어로 재생(`onAddMediaItems`). Gleo가 이 방식으로 붙는 기능은 Pleos가 준비 중이라 지금은 미디어 센터 검색에 쓰임([알려진 제한](#알려진-제한)) |
+| 오디오 포커스 | ExoPlayer가 포커스를 관리하고, 영구 손실이면 재생을 멈춰 포커스를 돌려줌. 일시 손실(Gleo, 통화)이나 사용자 정지에는 DJ 목소리도 바로 멈춤 |
 | 자동 재생 금지 | 서비스가 뜨거나 연결돼도 재생하지 않음. 시스템 재개 요청에는 목록만 준비 |
 | 서비스 수명 | `onCreate`에서 started 상태, 재생 중 포그라운드, `onTaskRemoved`에서 정지 후 `stopSelf` |
 | 주행 제한 | `distractionOptimized` 화면이 CarUxRestrictions를 따라 목록·사연 본문·가사를 숨기고 멘트를 한 줄로 줄임. 글 길이 제한(`LIMIT_STRING_LENGTH`)과 설정 금지(`NO_SETUP`) 항목도 반영 |
@@ -163,7 +162,8 @@ Android Studio 없이 설치하는 방법입니다. 공식 안내는 [Pleos 문�
 - **시간대**: 에뮬레이터 기본 시간대는 `America/Los_Angeles`라 DJ가 말하는 시각이 어긋납니다. `adb shell service call alarm 3 s16 Asia/Seoul`로 바꿉니다.
 - **좁은 창 보기**: `adb shell am task resize <taskId> 853 90 1694 1300`(한 칸), `… 853 90 2535 1300`(두 칸). taskId는 `adb shell dumpsys activity activities`의 DJ 트롯 Task 번호입니다.
 - **뒤로 키**: adb로 보내는 뒤로 키는 입력 포커스가 있는 창이 받습니다. 앱 화면을 한 번 누른 뒤 보냅니다.
-- **위치 권한**: `pleos.car.permission.FUSED_LOCATION`은 실행 중에 허락받는 권한입니다. 다른 Pleos 권한은 선언만으로 받습니다.
+- **권한**: 앱이 쓰는 Pleos 권한은 모두 선언만으로 받습니다. 실행 중에 묻는 권한은 없습니다.
+- **안내 직전 미루기 보기**: Virtual Console에서 방향지시등을 켜면 DJ 멘트가 화면에 먼저 뜨고, 끄면 목소리가 나옵니다.
 - **앱 창 크기**: 앱 창은 왼쪽 클러스터 옆 1682×1210dp(mdpi) 멀티 윈도우입니다. 화면은 이 크기를 기준으로 그리고 창에 맞춰 비율을 조정합니다.
 
 ### 목 서버로 시험하기
@@ -225,11 +225,12 @@ docs/                구조 설명, 공모전·Pleos 요건 정리, README 이�
 
 ## 알려진 제한
 
-- **위치 좌표는 아직 쓰지 않음**: FusedLocation 좌표를 받지만 DJ 멘트와 사연은 내비게이션 주소로 만듭니다. 좌표는 서버로 보내지 않습니다.
 - **운영 서버 준비 중**: 기본 빌드가 보는 운영 서버 주소는 아직 열리지 않았습니다(2026-10). 그동안은 `-Pdjtrot.api`로 개발 서버를 지정합니다.
 - **에뮬레이터에서 DJ 목소리가 나지 않음**: 에뮬레이터의 Pleos TTS 온디바이스 엔진이 `ON_DEVICE_ENGINE_ERROR`를 냅니다. 안드로이드 TTS도 같은 음성 서비스를 써서 소리가 나지 않습니다. 자막은 정상으로 나오고, Client ID/Secret을 넣으면 서버 모드로 말합니다.
 - **주행 모드 값 없음(에뮬레이터)**: 에뮬레이터가 DrivingMode 속성을 지원하지 않아 화면에서 생략합니다.
 - **말로 사연 넣기는 아직 없음**: 서버 계약에는 말로 넣은 사연(`spoken`) 자리가 있고, Pleos SpeechToText 연결은 다음 단계입니다.
+- **Gleo 음성 명령은 아직 없음**: Pleos 문서상 Media3 검색만으로 Gleo에 붙는 방식은 준비 중입니다. 지금 Gleo에 기능을 내주려면 Gleo Interface(`assets/schema.json`)를 선언하고 42dot 승인을 받아야 합니다.
+- **내비 안내 이벤트(에뮬레이터)**: 안내 직전 미루기는 내비가 TBT·주의 구간·카메라 이벤트를 보낼 때만 동작합니다. 어떤 이벤트를 보내는지는 내비 구현마다 다릅니다(Pleos NaviHelper 문서).
 - **홈 화면 미디어 위젯**: Pleos Media Center 템플릿을 쓴 앱만 홈 위젯과 시스템 미디어 목록에 자동으로 올라갑니다. DJ 트롯은 자체 화면을 쓰므로 런처와 독에서 엽니다.
 
 ## 공모전 제출물

@@ -8,7 +8,7 @@ DJ 트롯 차량 앱이 어떻게 짜여 있고 왜 그렇게 짰는지 정리�
 
 ```mermaid
 flowchart TB
-    System["시스템 미디어 · 스티어링 휠 · Gleo 음성"]
+    System["시스템 미디어 · 스티어링 휠 · 미디어 검색"]
     subgraph App["앱 프로세스"]
         Main["MainActivity<br/>DjScreen (Compose)"]
         Service["DjTrotLibraryService<br/>ExoPlayer · MediaLibrarySession"]
@@ -93,9 +93,13 @@ flowchart LR
     Calm --> Parts["목록 · 사연 본문 · 가사 숨김<br/>장식 애니메이션 멈춤"]
     Drive --> Text["brief(): 글 길이 제한"]
     Drive --> Setup["noSetup: 휴대폰 연결 막음"]
+    Navi["NaviHelper 안내 이벤트"] --> Hold["holdTalk: DJ 목소리 미룸"]
+    Signal["방향지시등"] --> Hold
 ```
 
 `DjScreen`은 `!stopped || restricted`이면 주행 중으로 보고 `LocalCalm`을 켭니다. 아래 부품은 이 값만 보고 스스로 줄어듭니다. 새 부품도 같은 값을 따라야 합니다. 판단 규칙(`DriveContext`)은 안드로이드에 의존하지 않아 JVM 테스트로 검사합니다.
+
+DJ 목소리는 화면과 따로 미룹니다. 내비가 300m 안의 회전, 주의 구간, 단속 카메라를 알리거나 방향지시등이 켜지면 `holdTalk`가 참이 됩니다. 멘트는 화면에 먼저 뜨고, 목소리는 풀리고 1.5초 쉰 뒤에 나옵니다. 15초를 넘게 기다리면 읽지 않습니다. 기기 TTS로 읽을 때는 음악을 0.3초에 걸쳐 먼저 줄이고 0.4초 뒤에 입을 뗍니다.
 
 ## 설계 결정
 

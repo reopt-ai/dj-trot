@@ -1,5 +1,6 @@
 package ai.reopt.djtrot.dj
 
+import ai.reopt.djtrot.car.Arrival
 import ai.reopt.djtrot.car.Destination
 import ai.reopt.djtrot.car.DriveContext
 import java.time.Instant
@@ -55,6 +56,17 @@ class DjScriptTest {
             assertTrue(line, line.contains("'힘내라 오늘도'"))
         }
         assertEquals("'고향역' 띄워 드립니다.", DjScript.play(SongInfo(title = "고향역", singer = ""), 0))
+    }
+
+    @Test fun `도착하면 걸린 시간과 거리로 마무리한다`() {
+        assertEquals("부산역에 도착했습니다. 2시간 13분, 186km 운전하시느라 고생 많으셨어요.", DjScript.arrival(Arrival("부산역", minutes = 133, km = 186.4)))
+        assertEquals("집에 도착했습니다. 2시간 운전하시느라 고생 많으셨어요.", DjScript.arrival(Arrival("집", minutes = 120, km = 0.4)))
+        assertEquals("회사에 도착했습니다. 운전하시느라 고생 많으셨어요.", DjScript.arrival(Arrival("회사")))
+        assertEquals("공항에 도착했습니다. 52km 운전하시느라 고생 많으셨어요.", DjScript.arrival(Arrival("공항", km = 52.3)))
+    }
+
+    @Test fun `가까운 길에는 수고했다고 하지 않는다`() {
+        assertEquals("마트에 도착했습니다. 가까운 길도 함께해서 즐거웠어요.", DjScript.arrival(Arrival("마트", minutes = 8, km = 3.1)))
     }
 
     @Test fun `seed가 음수여도 멘트를 고른다`() {

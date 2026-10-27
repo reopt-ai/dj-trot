@@ -1,10 +1,12 @@
 package ai.reopt.djtrot.dj
 
+import ai.reopt.djtrot.car.Arrival
 import ai.reopt.djtrot.car.DriveContext
 import java.time.Duration
 import java.time.Instant
 import java.time.LocalTime
 import java.time.OffsetDateTime
+import kotlin.math.roundToInt
 
 /** [requested] — 맡긴 사연으로 만든 드라이브 노래(신청곡). [fresh] — 만든 지 [DjScript.FRESH] 안이다. */
 data class SongInfo(val title: String, val singer: String, val requested: Boolean = false, val fresh: Boolean = false)
@@ -55,6 +57,24 @@ object DjScript {
             else -> "${time.greeting}. $play"
         }
     }
+
+    /** 목적지에 닿았을 때 이번 길을 마무리하는 한 문장. 노래는 끊지 않는다. 가까운 길에는 수고했다고 하지 않는다. */
+    fun arrival(arrival: Arrival): String {
+        val minutes = arrival.minutes?.takeIf { it > 0 }
+        val km = arrival.km?.takeIf { it >= 1 }?.let { "${it.roundToInt()}km" }
+        val arrived = "${arrival.name}에 도착했습니다."
+        if (minutes != null && minutes < SHORT_TRIP_MINUTES) return "$arrived 가까운 길도 함께해서 즐거웠어요."
+        val took = listOfNotNull(minutes?.let(::duration), km).joinToString(", ")
+        return if (took.isEmpty()) "$arrived 운전하시느라 고생 많으셨어요." else "$arrived $took 운전하시느라 고생 많으셨어요."
+    }
+
+    private fun duration(minutes: Int): String = when {
+        minutes < 60 -> "${minutes}분"
+        minutes % 60 == 0 -> "${minutes / 60}시간"
+        else -> "${minutes / 60}시간 ${minutes % 60}분"
+    }
+
+    private const val SHORT_TRIP_MINUTES = 15
 
     /** 🔑 "아까 막 만든"이라 부를 수 있는 시간 — 서버 DJ 브리프와 같은 1시간. */
     val FRESH: Duration = Duration.ofHours(1)

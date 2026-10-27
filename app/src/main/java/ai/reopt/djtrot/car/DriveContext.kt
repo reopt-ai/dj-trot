@@ -17,6 +17,15 @@ data class Destination(
     val remainKm: Double? = null,
 )
 
+/** 목적지에 닿았을 때 내비가 알려 주는 이번 길. 값이 없으면 null. */
+data class Arrival(
+    val name: String,
+    /** 걸린 시간(분). */
+    val minutes: Int? = null,
+    /** 달린 거리(km). */
+    val km: Double? = null,
+)
+
 /** 차가 지금 알려 주는 것 — DJ 멘트와 신청곡 사연의 재료. 모든 값은 SDK가 없거나 실패하면 비어 있다. */
 data class DriveContext(
     val gear: GearState = GearState.UNKNOWN,
@@ -24,8 +33,6 @@ data class DriveContext(
     val drivingMode: String? = null,
     val currentAddress: String? = null,
     val destination: Destination? = null,
-    val latitude: Double? = null,
-    val longitude: Double? = null,
     val batteryPercent: Int? = null,
     /** 🔑 CarUxRestrictions가 주행 최적화(DO)를 요구하는 중. 화면은 이 값으로 스스로 제한한다. */
     val restricted: Boolean = false,
@@ -33,6 +40,10 @@ data class DriveContext(
     val uxFlags: Int = 0,
     /** 글 길이 제한이 걸렸을 때 한 덩어리 글의 최대 글자 수(CarUxRestrictions.getMaxRestrictedStringLength). */
     val maxTextLength: Int = 0,
+    /** 내비가 곧 안내 음성을 낸다(회전 직전, 주의 구간, 단속 카메라). */
+    val guidanceSoon: Boolean = false,
+    /** 방향지시등이 켜져 있다(차선 변경·회전 중). */
+    val signaling: Boolean = false,
 ) {
     val region: String? get() = Region.label(currentAddress ?: destination?.address)
 
@@ -47,6 +58,12 @@ data class DriveContext(
      * 🔴 QR 로그인은 Pleos 정책상 모든 지역에서 주행 중 금지 — 휴대폰 연결은 이 값이 참이면 열지 않는다.
      */
     val noSetup: Boolean get() = restricted && (uxFlags and UX_NO_SETUP) != 0
+
+    /**
+     * 🔑 DJ가 지금 말을 꺼내지 않는다 — 내비 안내 음성과 겹치거나 운전자가 차선을 바꾸는 중이다.
+     *    멘트는 화면에 먼저 보이고, 목소리는 이 값이 풀린 뒤에 낸다.
+     */
+    val holdTalk: Boolean get() = guidanceSoon || signaling
 
     /** 제한이 걸렸으면 글을 [maxTextLength]자로 자른다. */
     fun brief(text: String): String =

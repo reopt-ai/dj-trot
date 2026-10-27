@@ -18,9 +18,9 @@
     <uses-permission android:name="pleos.car.permission.CAR_DRIVE" />
     <!-- EvBattery·Fuel -->
     <uses-permission android:name="pleos.car.permission.CAR_ENERGY" />
-    <!-- FusedLocation -->
-    <uses-permission android:name="pleos.car.permission.FUSED_LOCATION" />
-    <!-- NaviHelper 조회(get*Info) -->
+    <!-- TurnSignal(차선 변경 중에는 DJ가 말을 미룬다) -->
+    <uses-permission android:name="pleos.car.permission.CAR_LIGHTS" />
+    <!-- NaviHelper 조회(get*Info)와 안내 이벤트(TBT, 주의 구간, 카메라, 도착) -->
     <uses-permission android:name="pleos.car.permission.NAVI_ROUTE" />
     <!-- TextToSpeech(DJ 목소리) -->
     <uses-permission android:name="pleos.car.permission.TTS_SERVICE" />
@@ -64,7 +64,7 @@
             android:exported="false"
             android:label="휴대폰 연결" />
 
-        <!-- 🔑 Media3 MediaLibraryService — 시스템 미디어 센터·스티어링 휠·음성(Gleo) 검색이 이 서비스로 붙는다.
+        <!-- 🔑 Media3 MediaLibraryService — 시스템 미디어 센터·스티어링 휠·미디어 검색이 이 서비스로 붙는다.
              권한 없이 열어 두는 것이 미디어 앱의 표준이다. 연결은 MediaSession이 컨트롤러별로 받는다. -->
         <service
             android:name=".playback.DjTrotLibraryService"

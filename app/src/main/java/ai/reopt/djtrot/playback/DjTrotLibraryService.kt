@@ -35,16 +35,21 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.guava.future
+import kotlinx.coroutines.withTimeoutOrNull
 
 /**
  * DJ 트롯 재생 서비스 — Pleos Music/Audio 카테고리 요건을 이 한 곳에서 지킨다.
- * - Media3 MediaLibraryService + MediaSession: 미디어 센터·스티어링 휠·Gleo 음성 검색이 붙는다.
+ * - Media3 MediaLibraryService + MediaSession: 미디어 센터·스티어링 휠·미디어 검색이 붙는다.
  * - 🔴 자동 재생 금지: 서비스가 뜨거나 연결돼도 재생하지 않는다. 사용자 동작·시스템 재개 요청에서만 재생한다.
  * - 🔴 오디오 포커스: 영구 손실이면 정지해 포커스를 돌려준다. 일시 손실은 ExoPlayer가 멈췄다 이어 튼다.
+ *   DJ 목소리는 음악과 따로 나오므로 음악이 눌리는 순간(일시 손실, 사용자 정지) 함께 멈춘다 — Gleo·통화 위로 말하지 않는다.
+ * - 🔑 DJ는 내비 안내 직전과 방향지시등이 켜진 동안 말을 미룬다(DriveContext.holdTalk).
  * - 🔴 앱 종료(onTaskRemoved): 재생 정지 → stopSelf → super 순서.
  * - 🔑 Pleos 서비스 수명 요건: onCreate에서 startService로 Started 상태를 만든다. 포그라운드 전환은 재생 시 Media3가 한다.
  */
@@ -60,6 +65,11 @@ class DjTrotLibraryService : MediaLibraryService() {
     private var briefJob: Job? = null
     /** 서버가 만든 DJ 멘트 음성을 트는 작은 플레이어. 오디오 포커스는 본 플레이어가 쥐고, 말하는 동안 음악을 줄인다. */
     private var clip: ExoPlayer? = null
+    private var clipOn = false
+    /** 기기 TTS가 입을 떼기 전, 음악을 먼저 줄여 두는 동안. */
+    private var leadIn = false
+    private var fade: Job? = null
+    private var fadeTarget = 1f
     private val unplayable = mutableSetOf<String>()
     /** 🔑 연속 실패 수 — 서버가 음원을 못 주는 상황이면 목록 전체를 돌지 않고 몇 곡 만에 멈춘다. */
     private var failuresInRow = 0
@@ -91,9 +101,20 @@ class DjTrotLibraryService : MediaLibraryService() {
                 if (player.mediaItemCount == 0) player.setMediaItem(item) else player.addMediaItem(player.currentMediaItemIndex + 1, item)
                 val line = "신청하신 노래 '${song.title}'가 완성됐어요. 다음 곡으로 들려 드릴게요."
                 app.dj.update { it.say(line) }
-                if (app.djTalks) app.voice.speak(line)
+                if (app.djTalks) launch { talk(line) }
             }
         }
+        // 목적지에 닿으면 노래는 그대로 두고 이번 길을 마무리하는 말을 한다.
+        scope.launch {
+            app.car.arrivals.collect { arrival ->
+                if (!app.djTalks || !player.isPlaying) return@collect
+                val line = DjScript.arrival(arrival)
+                app.dj.update { it.say(line) }
+                launch { talk(line) }
+            }
+        }
+        // 🔑 DJ가 말하는 동안 음악을 줄인다 — 기기 TTS든 서버 음성이든.
+        scope.launch { app.voice.speaking.collect { duck() } }
         // 백그라운드에서 시스템이 바인딩해 뜬 경우 시작 제한에 걸릴 수 있다 — 그때는 Media3의 포그라운드 처리에 맡긴다.
         runCatching { startService(Intent(this, DjTrotLibraryService::class.java)) }
             .onFailure { Log.i(TAG, "Started 상태 전환 생략: ${it.javaClass.simpleName}") }
@@ -145,18 +166,79 @@ class DjTrotLibraryService : MediaLibraryService() {
                 .onFailure { Log.i(TAG, "DJ 브리프 대신 기기 멘트: ${it.message}") }
                 .getOrNull()
             if (player.currentMediaItem?.mediaId != item.mediaId) return@launch
+            // 🔑 브리프를 기다리는 사이 멈췄으면 말하지 않는다. 다시 틀 때 새로 소개한다.
+            if (!player.isPlaying) {
+                announced = null
+                return@launch
+            }
             if (brief == null) {
                 val line = DjScript.intro(song, drive, now, seed)
                 app.dj.update { it.say(line, now).copy(problem = null) }
-                app.voice.speak(line)
+                talk(line, item.mediaId)
                 return@launch
             }
             val mentions = song.title.isNotBlank() && song.title.trim() in brief.script
             val line = if (mentions) brief.script else "${brief.script} ${DjScript.play(song, seed)}"
             app.dj.update { it.say(line, now).copy(problem = null).suggest(SongRequest.of(brief.song)) }
             val voiceUrl = brief.voiceUrl
-            if (voiceUrl != null && mentions) playClip(app.api.absolute(voiceUrl)) else app.voice.speak(line)
+            talk(line, item.mediaId, clipUrl = voiceUrl?.takeIf { mentions }?.let(app.api::absolute))
         }
+    }
+
+    /**
+     * 멘트를 소리 내어 읽는다. 화면에는 이미 보이고 있다.
+     * 🔑 내비 안내 직전·차선 변경 중이면 풀릴 때까지 기다리고, [HOLD_MAX_MS]가 넘으면 읽지 않는다.
+     *    풀린 뒤에도 [SETTLE_MS] 쉬고 말한다 — 안내 음성이 끝나자마자 끼어들지 않는다.
+     *    기다리는 사이 곡이 바뀌었거나 멈췄으면 읽지 않는다.
+     * 🔑 기기 TTS는 음악을 먼저 줄이고 [LEAD_IN_MS] 뒤에 말한다(라디오 진행처럼, Pleos 음성 앞 여백 권장).
+     */
+    private suspend fun talk(line: String, itemId: String? = null, clipUrl: String? = null) {
+        val quiet = withTimeoutOrNull(HOLD_MAX_MS) {
+            while (app.car.state.value.holdTalk) {
+                app.car.state.first { !it.holdTalk }
+                delay(SETTLE_MS)
+            }
+        }
+        if (quiet == null || !stillOn(itemId)) return
+        if (clipUrl != null) return playClip(clipUrl)
+        leadIn = true
+        duck()
+        try {
+            delay(LEAD_IN_MS)
+            if (!stillOn(itemId)) return
+            app.voice.speak(line)
+            withTimeoutOrNull(START_WAIT_MS) { app.voice.speaking.first { it } }
+        } finally {
+            leadIn = false
+            duck()
+        }
+    }
+
+    private fun stillOn(itemId: String?): Boolean =
+        player.isPlaying && (itemId == null || player.currentMediaItem?.mediaId == itemId)
+
+    /** 🔑 음악 크기는 끊기지 않게 [FADE_MS]에 걸쳐 바꾼다. */
+    private fun duck() {
+        val target = if (clipOn || leadIn || app.voice.speaking.value) DUCKED else 1f
+        if (target == fadeTarget) return
+        fadeTarget = target
+        fade?.cancel()
+        fade = scope.launch {
+            val from = player.volume
+            for (step in 1..FADE_STEPS) {
+                delay(FADE_MS / FADE_STEPS)
+                player.volume = from + (target - from) * step / FADE_STEPS
+            }
+        }
+    }
+
+    /** DJ 목소리를 모두 멈추고 음악 크기를 되돌린다. */
+    private fun hush() {
+        app.voice.stop()
+        clip?.stop()
+        clipOn = false
+        leadIn = false
+        duck()
     }
 
     /** 오래 멈췄다 같은 곡을 이어 틀면 신청곡 제안만 새로 받는다. 곡 중간이라 DJ는 말하지 않는다. */
@@ -187,15 +269,20 @@ class DjTrotLibraryService : MediaLibraryService() {
                 clip = created
                 created.addListener(object : Player.Listener {
                     override fun onPlaybackStateChanged(state: Int) {
-                        if (state == Player.STATE_ENDED || state == Player.STATE_IDLE) player.volume = 1f
+                        if (state == Player.STATE_ENDED || state == Player.STATE_IDLE) {
+                            clipOn = false
+                            duck()
+                        }
                     }
                     override fun onPlayerError(error: PlaybackException) {
-                        player.volume = 1f
+                        clipOn = false
+                        duck()
                         app.dj.value.line?.let(app.voice::speak)
                     }
                 })
             }
-        player.volume = DUCKED
+        clipOn = true
+        duck()
         voice.setMediaItem(MediaItem.fromUri(url))
         voice.prepare()
         voice.play()
@@ -225,14 +312,13 @@ class DjTrotLibraryService : MediaLibraryService() {
         }
 
         override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
-            if (!playWhenReady) {
-                clip?.stop()
-                player.volume = 1f
-            }
-            if (!playWhenReady && reason == Player.PLAY_WHEN_READY_CHANGE_REASON_AUDIO_FOCUS_LOSS) {
-                app.voice.stop()
-                player.stop()
-            }
+            if (!playWhenReady) hush()
+            if (!playWhenReady && reason == Player.PLAY_WHEN_READY_CHANGE_REASON_AUDIO_FOCUS_LOSS) player.stop()
+        }
+
+        /** 🔴 일시 손실(Gleo 음성, 통화)은 playWhenReady가 아니라 이 값으로 온다 — DJ도 바로 멈춘다(Pleos 오디오 포커스 가이드). */
+        override fun onPlaybackSuppressionReasonChanged(playbackSuppressionReason: Int) {
+            if (playbackSuppressionReason != Player.PLAYBACK_SUPPRESSION_REASON_NONE) hush()
         }
 
         /** 음원을 받지 못한 곡은 건너뛴다. 목록 전체가 안 되면 멈추고 화면에 알린다. */
@@ -373,6 +459,16 @@ class DjTrotLibraryService : MediaLibraryService() {
         const val TAG = "DjTrotPlayback"
         /** DJ가 말하는 동안 음악 크기. */
         const val DUCKED = 0.3f
+        const val FADE_MS = 300L
+        const val FADE_STEPS = 10
+        /** 음악을 줄이고 기기 TTS가 입을 떼기까지. */
+        const val LEAD_IN_MS = 400L
+        /** 기기 TTS가 말을 시작하지 않을 때 음악을 되돌리기까지. */
+        const val START_WAIT_MS = 3_000L
+        /** 내비 안내·차선 변경이 끝나고 DJ가 말하기까지 쉬는 시간. */
+        const val SETTLE_MS = 1_500L
+        /** 내비 안내·차선 변경이 끝나기를 기다리는 가장 긴 시간. 넘으면 멘트는 화면에만 둔다. */
+        const val HOLD_MAX_MS = 15_000L
         const val MAX_FAILURES_IN_ROW = 3
     }
 }

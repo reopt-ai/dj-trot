@@ -38,9 +38,9 @@ uv run --no-project tools/mock_djtrot.py --audio-dir <mp3 폴더> --upstream <DJ
 
 **`DjTrotApp`이 전역 객체를 만듭니다.** `api`, `account`, `catalog`, `orders`, `car`, `voice`를 lazy로 만들고, 화면과 재생 서비스가 함께 보는 `dj: MutableStateFlow<DjState>`를 둡니다. 둘은 같은 프로세스에서 이 객체로 상태를 나눕니다.
 
-**재생은 서비스가 맡습니다.** `playback/DjTrotLibraryService`가 ExoPlayer와 MediaLibrarySession을 갖고, 화면(`ui/MainActivity`)은 `MediaController`로만 붙습니다. 시스템 미디어, 스티어링 휠, Gleo 음성 검색도 같은 세션에 붙습니다. Pleos Music/Audio 요건 가운데 자동 재생 금지, 오디오 포커스, `onTaskRemoved` 순서, Started 상태는 이 클래스 KDoc에 모여 있으니 고칠 때 깨지 않게 합니다.
+**재생은 서비스가 맡습니다.** `playback/DjTrotLibraryService`가 ExoPlayer와 MediaLibrarySession을 갖고, 화면(`ui/MainActivity`)은 `MediaController`로만 붙습니다. 시스템 미디어, 스티어링 휠, 미디어 검색도 같은 세션에 붙습니다(Gleo가 Media3 검색으로 붙는 방식은 Pleos가 준비 중). Pleos Music/Audio 요건 가운데 자동 재생 금지, 오디오 포커스, `onTaskRemoved` 순서, Started 상태는 이 클래스 KDoc에 모여 있으니 고칠 때 깨지 않게 합니다.
 
-**DJ 멘트는 서비스가 곡이 실제로 울릴 때 냅니다.** `onIsPlayingChanged`와 `onMediaItemTransition`에서 `announce()`를 부릅니다. 서버 DJ 브리프(`/dj/brief`, 8초 제한)를 먼저 쓰고, 실패하면 `dj/DjScript`(기기 템플릿)로 바꿉니다. 서버가 준 음성 클립은 멘트가 곡 제목을 말할 때만 음악을 줄인 위에 틀고, 아니면 `dj/DjVoice`(Pleos TTS, 안 되면 Android TTS)로 읽습니다. 브리프가 준 신청곡 제안은 `DjState.suggestion`에 들어가고 20분이 지나면 버립니다. 제안이 없거나 버려지면 화면이 `dj/StoryBuilder`로 기기에서 만든 제안을 씁니다.
+**DJ 멘트는 서비스가 곡이 실제로 울릴 때 냅니다.** `onIsPlayingChanged`와 `onMediaItemTransition`에서 `announce()`를 부릅니다. 서버 DJ 브리프(`/dj/brief`, 8초 제한)를 먼저 쓰고, 실패하면 `dj/DjScript`(기기 템플릿)로 바꿉니다. 서버가 준 음성 클립은 멘트가 곡 제목을 말할 때만 틀고, 아니면 `dj/DjVoice`(Pleos TTS, 안 되면 Android TTS)로 읽습니다. 어느 쪽이든 말하는 동안 음악을 줄이고(`DjVoice.speaking`, 크기는 `duck()`이 서서히 바꿉니다), 재생이 눌리면(사용자 정지, 일시 포커스 손실) 함께 멈춥니다. Pleos TTS `speak`의 두 번째 인자는 `isFinal`이라 항상 true로 부릅니다. 브리프가 준 신청곡 제안은 `DjState.suggestion`에 들어가고 20분이 지나면 버립니다. 제안이 없거나 버려지면 화면이 `dj/StoryBuilder`로 기기에서 만든 제안을 씁니다.
 
 **노래 목록과 메타데이터는 `playback/Catalog`가 쥡니다.** 브라우즈 트리(`root`·`picks`·`latest`·`styles`·`style:{id}`·`mine`)와 메모리 곡 레지스트리입니다. 미디어 ID는 `song:` 접두사를 붙이고, `resolve()`는 목록에서 한 번 본 곡만 압니다. 곡 정보(ID, 장르, 내가 만든 곡인지, 만든 시각)는 `MediaMetadata.extras`의 `djtrot.*` 키로 화면과 서비스에 전해집니다. 곡을 고르면 그 곡이 있던 목록을 큐로 이어 틉니다(`queueFor`).
 
@@ -50,6 +50,6 @@ uv run --no-project tools/mock_djtrot.py --audio-dir <mp3 폴더> --upstream <DJ
 
 **서버 계약은 `api/`에 있습니다.** `DjTrotApi`(OkHttp, 코루틴)와 `Models.kt`의 직렬화 모델입니다. 노래는 출처와 상관없이 `trot-song/1` 한 모양입니다. 읽을 때는 `ignoreUnknownKeys`로 받지만, **보낼 때는 서버가 모르는 키를 400으로 거절합니다.** 그래서 `explicitNulls=false`로 null 키를 빼고, 요청 모델에 필드를 더하려면 서버 계약이 먼저 바뀌어야 합니다. `ContractTest`가 이 모양을 지킵니다.
 
-**차량 신호는 `car/`에 있습니다.** `CarSignals`가 Pleos Vehicle, NaviHelper, FusedLocation과 `AaosCar`(GEAR_SELECTION, CarUxRestrictions)를 하나의 `StateFlow<DriveContext>`로 모읍니다. SDK마다 따로 실패할 수 있으니 하나가 안 되면 그 값만 비웁니다. `DriveContext`는 안드로이드에 의존하지 않는 순수 모델이라 JVM 테스트로 검사합니다. 서버로 갈 때는 `dj/DriveInputs.kt`의 `toInput()`으로만 바뀌고, 위치 좌표와 식별 정보는 이 단계에서 빠집니다.
+**차량 신호는 `car/`에 있습니다.** `CarSignals`가 Pleos Vehicle, NaviHelper와 `AaosCar`(GEAR_SELECTION, CarUxRestrictions)를 하나의 `StateFlow<DriveContext>`로 모읍니다. SDK마다 따로 실패할 수 있으니 하나가 안 되면 그 값만 비웁니다. `DriveContext`는 안드로이드에 의존하지 않는 순수 모델이라 JVM 테스트로 검사합니다. 위치는 내비 주소만 받고 좌표는 받지 않습니다. 서버로 갈 때는 `dj/DriveInputs.kt`의 `toInput()`으로만 바뀌고, 식별 정보는 이 단계에서 빠집니다. 내비 안내 직전과 방향지시등이 켜진 동안은 `DriveContext.holdTalk`가 참이고, 서비스의 `talk()`가 풀릴 때까지 목소리를 미룹니다.
 
 **화면은 Compose 단일 화면입니다.** `ui/DjScreen`이 창 크기로 넓은 창(두 칸, 기준 1682×1210dp)과 좁은 창(한 칸, 기준 840dp 폭)을 고르고, 기준 크기에 맞춰 `LocalDensity`를 비례 조정합니다. 주행 중 여부(`!drive.stopped || drive.restricted`)는 `LocalCalm`(`ui/Parts.kt`)으로 내려가고, 목록, 사연 본문, 가사, 애니메이션이 이 값을 보고 스스로 숨거나 멈춥니다. 새 화면 요소도 `LocalCalm`과 `DriveContext.brief()`·`noSetup`을 따라야 합니다. 색과 글자 크기는 `ui/Theme.kt`의 `DjColors`와 `DjType`(Pleos 단계)만 쓰고, 글자 대비는 4.5:1 이상입니다. 휴대폰 연결 화면 `ConnectActivity`는 `distractionOptimized`가 아니라서 주행 중에는 시스템이 막습니다.
