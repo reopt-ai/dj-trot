@@ -15,6 +15,8 @@ import java.time.LocalTime
 import kotlinx.coroutines.delay
 import ai.reopt.djtrot.dj.SongRequest
 import ai.reopt.djtrot.playback.Catalog
+import ai.reopt.djtrot.playback.Shelf
+import androidx.media3.common.C
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -234,13 +236,6 @@ private fun Tag(text: String) {
 
 // ── 노래 고르기 ────────────────────────────────────────
 
-enum class ShelfTab(val label: String, val parent: String) {
-    PICKS("추천곡", Catalog.PICKS),
-    LATEST("새 노래", Catalog.LATEST),
-    STYLES("장르", Catalog.STYLES),
-    MINE("내 노래", Catalog.MINE),
-}
-
 sealed interface ShelfState {
     data object Loading : ShelfState
     data class Ready(val items: List<MediaItem>) : ShelfState
@@ -248,11 +243,12 @@ sealed interface ShelfState {
 }
 
 /**
- * 노래 고르기의 고른 탭과 받아 둔 목록. 화면 밖으로 나갔다 와도(좁은 창의 탭 전환) 다시 받지 않게 위에서 들고 있는다.
+ * 노래 고르기의 고른 탭과 받아 둔 목록. 탭은 브라우즈 트리 루트의 네 폴더([Shelf])와 같다.
+ * 화면 밖으로 나갔다 와도(좁은 창의 탭 전환) 다시 받지 않게 위에서 들고 있는다.
  */
 class ShelfMemory {
-    var tab by mutableStateOf(ShelfTab.PICKS)
-    val states = mutableStateMapOf<ShelfTab, ShelfState>()
+    var tab by mutableStateOf(Shelf.PICKS)
+    val states = mutableStateMapOf<Shelf, ShelfState>()
 }
 
 @Composable
@@ -268,44 +264,53 @@ fun SongShelf(app: DjTrotApp, shelf: ShelfMemory, ui: PlayerUi, player: Player?,
     val connected = connection is Connection.Connected
 
     // 새 노래가 완성되거나 연결이 바뀌면 내 노래를 다시 받는다.
-    LaunchedEffect(order?.state == "ready", connected) { states.remove(ShelfTab.MINE) }
-    LaunchedEffect(tab, retry, connected, states[ShelfTab.MINE] == null) {
-        if (tab == ShelfTab.MINE && !connected) return@LaunchedEffect
+    LaunchedEffect(order?.state == "ready", connected) { states.remove(Shelf.MINE) }
+    LaunchedEffect(tab, retry, connected, states[Shelf.MINE] == null) {
+        if (tab == Shelf.MINE && !connected) return@LaunchedEffect
         if (states[tab] is ShelfState.Ready) return@LaunchedEffect
         states[tab] = ShelfState.Loading
-        states[tab] = runCatching { app.catalog.children(tab.parent) }
+        states[tab] = runCatching { app.catalog.children(tab) }
             .fold({ ShelfState.Ready(it) }, { ShelfState.Failed })
     }
 
-    fun play(mediaId: String) = playOrToggle(player, ui, mediaId)
-
     Column(modifier) {
-        Segmented(ShelfTab.entries, tab, { it.label }, { shelf.tab = it })
+        Segmented(Shelf.entries, tab, { it.label }, { shelf.tab = it })
         Spacer(Modifier.height(18.dp))
         Box(Modifier.weight(1f).fillMaxWidth()) {
-            when (val state = if (tab == ShelfTab.MINE && !connected) ShelfState.Ready(emptyList()) else states[tab] ?: ShelfState.Loading) {
+            when (val state = if (tab == Shelf.MINE && !connected) ShelfState.Ready(emptyList()) else states[tab] ?: ShelfState.Loading) {
                 ShelfState.Loading -> LoadingRows()
                 ShelfState.Failed -> ErrorNotice("노래 목록을 받지 못했어요.", action = "다시 받기", onAction = { retry++ })
                 is ShelfState.Ready -> when {
-                    tab == ShelfTab.MINE && !connected -> EmptyShelf("휴대폰을 연결하면 길에서 만든 노래가 여기 모여요")
-                    state.items.isEmpty() && tab == ShelfTab.MINE -> EmptyShelf("아직 만든 노래가 없어요. 이 길의 신청곡을 만들어 보세요")
+                    tab == Shelf.MINE && !connected -> EmptyShelf("휴대폰을 연결하면 길에서 만든 노래가 여기 모여요")
+                    state.items.isEmpty() && tab == Shelf.MINE -> EmptyShelf("아직 만든 노래가 없어요. 이 길의 신청곡을 만들어 보세요")
                     state.items.isEmpty() -> EmptyShelf("노래 목록을 준비하고 있어요. 곧 무대에 올라와요")
-                    tab == ShelfTab.STYLES -> StyleGrid(state.items, ::play)
-                    else -> SongList(state.items, ui, onPlay = ::play)
+                    tab == Shelf.STYLES -> StyleGrid(state.items) { id -> player?.let { playList(it, id) } }
+                    else -> SongList(state.items, ui) { index -> playFrom(player, ui, state.items, index) }
                 }
             }
         }
     }
 }
 
-/** 고른 곡을 튼다. 지금 곡을 다시 누르면 처음부터 다시 틀지 않고 멈춤·재생만 바꾼다. */
-private fun playOrToggle(player: Player?, ui: PlayerUi, mediaId: String) {
+/**
+ * 고른 곡부터 보이는 목록을 이어 튼다. 지금 곡을 다시 누르면 처음부터 다시 틀지 않고 멈춤·재생만 바꾼다.
+ * 🔑 목록을 통째로 큐로 보낸다 — 같은 곡이 여러 탭에 있어도 누른 탭의 순서대로 이어진다.
+ */
+private fun playFrom(player: Player?, ui: PlayerUi, items: List<MediaItem>, index: Int) {
     player ?: return
-    if (mediaId == ui.mediaId) {
+    val picked = items.getOrNull(index) ?: return
+    if (picked.mediaId == ui.mediaId) {
         if (player.isPlaying) player.pause() else player.play()
         return
     }
-    player.setMediaItem(MediaItem.Builder().setMediaId(mediaId).build())
+    player.setMediaItems(items.map { MediaItem.Builder().setMediaId(it.mediaId).build() }, index, C.TIME_UNSET)
+    player.prepare()
+    player.play()
+}
+
+/** 장르 카드나 "DJ 트롯 시작"처럼 목록 자체를 누르면 그 목록을 처음부터 튼다. 곡은 서비스가 채운다. */
+internal fun playList(player: Player, listId: String) {
+    player.setMediaItem(MediaItem.Builder().setMediaId(listId).build())
     player.prepare()
     player.play()
 }
@@ -321,7 +326,7 @@ fun MadeSongs(app: DjTrotApp, ui: PlayerUi, player: Player?, modifier: Modifier)
     val connected = connection is Connection.Connected
     // 새 노래가 완성되거나 연결이 바뀌면 다시 받는다.
     val songs by produceState<List<MediaItem>?>(null, connected, order?.state == "ready") {
-        value = if (connected) runCatching { app.catalog.children(Catalog.MINE) }.getOrDefault(emptyList()) else emptyList()
+        value = if (connected) runCatching { app.catalog.children(Shelf.MINE) }.getOrDefault(emptyList()) else emptyList()
     }
     Column(modifier.fillMaxWidth().djCard(radius = 30.dp).padding(start = 34.dp, end = 20.dp, top = 30.dp)) {
         Text(if (connected) "길에서 만든 노래" else "이렇게 만들어져요", style = body(DjType.BodyS, DjColors.Gold, FontWeight.Bold))
@@ -336,14 +341,14 @@ fun MadeSongs(app: DjTrotApp, ui: PlayerUi, player: Player?, modifier: Modifier)
             list == null -> Unit
             list.isEmpty() -> Text("아직 만든 노래가 없어요. 위 사연으로 첫 노래를 만들어 보세요", style = body(DjType.BodyS, DjColors.Muted), modifier = Modifier.padding(end = 14.dp))
             else -> Box(Modifier.weight(1f)) {
-                SongList(list, ui, fade = DjColors.Card) { playOrToggle(player, ui, it) }
+                SongList(list, ui, fade = DjColors.Card) { index -> playFrom(player, ui, list, index) }
             }
         }
     }
 }
 
 @Composable
-private fun SongList(items: List<MediaItem>, ui: PlayerUi, fade: Color = DjColors.Black, onPlay: (String) -> Unit) {
+private fun SongList(items: List<MediaItem>, ui: PlayerUi, fade: Color = DjColors.Black, onPlay: (index: Int) -> Unit) {
     val list = rememberLazyListState()
     // 지금 곡이 목록 밖에 있으면 한 줄 위까지 보이게 굴린다.
     LaunchedEffect(ui.mediaId, items) {
@@ -356,7 +361,7 @@ private fun SongList(items: List<MediaItem>, ui: PlayerUi, fade: Color = DjColor
     Box(Modifier.fillMaxSize()) {
         LazyColumn(Modifier.scrollbar(list), state = list, verticalArrangement = Arrangement.spacedBy(4.dp), contentPadding = PaddingValues(end = 18.dp, bottom = 60.dp)) {  // 오른쪽 18dp는 스크롤 막대 자리
             itemsIndexed(items, key = { _, item -> item.mediaId }) { index, item ->
-                SongRow(item, current = item.mediaId == ui.mediaId, playing = ui.playing, onPlay = onPlay)
+                SongRow(item, current = item.mediaId == ui.mediaId, playing = ui.playing) { onPlay(index) }
                 if (index < items.lastIndex) Box(Modifier.padding(start = 124.dp, end = 16.dp).fillMaxWidth().height(1.dp).background(DjColors.Line))
             }
         }
@@ -372,7 +377,7 @@ private fun SongList(items: List<MediaItem>, ui: PlayerUi, fade: Color = DjColor
  * 🔑 부제는 주제 · 장르. 제공 곡은 모두 같은 악단이라 가수 이름은 고르는 데 쓸모가 없다.
  */
 @Composable
-private fun SongRow(item: MediaItem, current: Boolean, playing: Boolean, onPlay: (String) -> Unit) {
+private fun SongRow(item: MediaItem, current: Boolean, playing: Boolean, onPlay: () -> Unit) {
     val meta = item.mediaMetadata
     val style = meta.extras?.getString(Catalog.EXTRA_STYLE)
     val topic = meta.extras?.getString(Catalog.EXTRA_TOPIC_LABEL)
@@ -385,7 +390,7 @@ private fun SongRow(item: MediaItem, current: Boolean, playing: Boolean, onPlay:
             .clip(RoundedCornerShape(22.dp))
             .background(if (current) DjColors.Cream else Color.Transparent)
             .then(if (current) Modifier.border(1.5.dp, DjColors.LineStrong, RoundedCornerShape(22.dp)) else Modifier)
-            .tap(source, label = if (current && playing) "일시정지" else "재생") { onPlay(item.mediaId) }
+            .tap(source, label = if (current && playing) "일시정지" else "재생", onClick = onPlay)
             .padding(horizontal = 16.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {

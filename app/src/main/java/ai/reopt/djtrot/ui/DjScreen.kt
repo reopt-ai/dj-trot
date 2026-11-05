@@ -7,7 +7,7 @@ import ai.reopt.djtrot.api.Labels
 import ai.reopt.djtrot.api.LyricLine
 import ai.reopt.djtrot.car.DriveContext
 import ai.reopt.djtrot.dj.StoryBuilder
-import ai.reopt.djtrot.playback.Catalog
+import ai.reopt.djtrot.playback.Shelf
 import androidx.compose.animation.AnimatedContent
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.Crossfade
@@ -432,9 +432,7 @@ private fun StageIdle(player: Player?, modifier: Modifier) {
             Text("재생 서비스에 연결하는 중…", style = body(DjType.BodyS, DjColors.Muted))
         } else {
             SatinButton("DJ 트롯 시작", Modifier.fillMaxWidth(), height = 120.dp) {
-                player.setMediaItem(MediaItem.Builder().setMediaId(Catalog.PICKS).build())
-                player.prepare()
-                player.play()
+                playList(player, Shelf.PICKS.id)
             }
             Spacer(Modifier.height(16.dp))
             Text("추천곡부터 이어서 틀어요", style = body(DjType.LabelM, DjColors.Muted), modifier = Modifier.align(Alignment.CenterHorizontally))

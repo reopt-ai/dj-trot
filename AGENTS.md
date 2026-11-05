@@ -42,7 +42,7 @@ uv run --no-project tools/mock_djtrot.py --audio-dir <mp3 폴더> --upstream <DJ
 
 **DJ 멘트는 서비스가 곡이 실제로 울릴 때 냅니다.** `onIsPlayingChanged`와 `onMediaItemTransition`에서 `announce()`를 부릅니다. 서버 DJ 브리프(`/dj/brief`, 8초 제한)를 먼저 쓰고, 실패하면 `dj/DjScript`(기기 템플릿)로 바꿉니다. 서버가 준 음성 클립은 멘트가 곡 제목을 말할 때만 틀고, 아니면 `dj/DjVoice`(Pleos TTS, 안 되면 Android TTS)로 읽습니다. 어느 쪽이든 말하는 동안 음악을 줄이고(`DjVoice.speaking`, 크기는 `duck()`이 서서히 바꿉니다), 재생이 눌리면(사용자 정지, 일시 포커스 손실) 함께 멈춥니다. Pleos TTS `speak`의 두 번째 인자는 `isFinal`이라 항상 true로 부릅니다. 브리프가 준 신청곡 제안은 `DjState.suggestion`에 들어가고 20분이 지나면 버립니다. 제안이 없거나 버려지면 화면이 `dj/StoryBuilder`로 기기에서 만든 제안을 씁니다.
 
-**노래 목록과 메타데이터는 `playback/Catalog`가 쥡니다.** 브라우즈 트리(`root`·`picks`·`latest`·`styles`·`style:{id}`·`mine`)와 메모리 곡 레지스트리입니다. 미디어 ID는 `song:` 접두사를 붙이고, `resolve()`는 목록에서 한 번 본 곡만 압니다. 곡 정보(ID, 장르, 내가 만든 곡인지, 만든 시각)는 `MediaMetadata.extras`의 `djtrot.*` 키로 화면과 서비스에 전해집니다. 곡을 고르면 그 곡이 있던 목록을 큐로 이어 틉니다(`queueFor`).
+**노래 목록과 메타데이터는 `playback/Catalog`가 쥡니다.** 브라우즈 트리와 메모리 곡 레지스트리입니다. 트리의 모양은 `playback/MediaPath.kt`에 한 번만 적혀 있습니다. 루트 아래 네 폴더 `Shelf`(추천·새 노래·장르·내 노래)는 미디어 센터의 탭이자 화면의 노래 고르기 탭입니다. 미디어 ID 문자열은 `MediaPath.parse()`와 `MediaPath.id`로만 읽고 만듭니다. 탭을 늘리지 말고 폴더 아래에 둡니다. `resolve()`는 목록에서 한 번 본 곡만 압니다. 곡 정보(ID, 장르, 내가 만든 곡인지, 만든 시각)는 `MediaMetadata.extras`의 `djtrot.*` 키로 화면과 서비스에 전해집니다. 화면에서 곡을 고르면 보이는 목록을 통째로 큐로 보내고, 미디어 센터처럼 곡 하나만 오면 그 곡을 마지막으로 보여 준 목록을 이어 틉니다(`queueFor`).
 
 **노래 주문은 앱 범위에서 돕니다.** `dj/SongOrders`는 `POST /songs`를 requestKey로 멱등하게 보내고(응답 없이 실패한 주문을 다시 누르면 같은 키), 5초마다 확인합니다. 완성되면 `catalog.register()` 뒤 `ready`로 내보내고, 서비스가 그 곡을 지금 곡 다음에 넣습니다. 화면을 닫아도 끝까지 지켜봅니다.
 

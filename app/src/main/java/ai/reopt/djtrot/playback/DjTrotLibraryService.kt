@@ -97,7 +97,7 @@ class DjTrotLibraryService : MediaLibraryService() {
         // 신청한 노래가 완성되면 지금 곡 다음에 넣고 DJ가 알린다.
         scope.launch {
             app.orders.ready.collect { song ->
-                val item = catalog.resolve(Catalog.SONG_PREFIX + song.id) ?: return@collect
+                val item = catalog.resolve(MediaPath.Song(song.id).id) ?: return@collect
                 if (player.mediaItemCount == 0) player.setMediaItem(item) else player.addMediaItem(player.currentMediaItemIndex + 1, item)
                 val line = "신청하신 노래 '${song.title}'가 완성됐어요. 다음 곡으로 들려 드릴게요."
                 app.dj.update { it.say(line) }
@@ -396,7 +396,8 @@ class DjTrotLibraryService : MediaLibraryService() {
 
         /**
          * 🔑 재생 요청을 실제 재생 목록으로 바꾼다.
-         * - 곡 하나 → 그 곡이 있던 목록 전체(그 곡부터)
+         * - 곡 하나(미디어 센터) → 그 곡을 마지막으로 보여 준 목록 전체(그 곡부터)
+         * - 곡 여럿(앱 화면) → 받은 목록 그대로
          * - 폴더(예: "DJ 트롯 추천") → 폴더의 곡 전부
          * - 음성 검색("트롯 틀어줘") → 검색 결과, 없으면 추천
          */
@@ -414,7 +415,7 @@ class DjTrotLibraryService : MediaLibraryService() {
             val query = single?.requestMetadata?.searchQuery
             when {
                 query != null -> {
-                    val found = catalog.search(query).ifEmpty { catalog.children(Catalog.PICKS) }
+                    val found = catalog.search(query).ifEmpty { catalog.children(Shelf.PICKS) }
                     MediaSession.MediaItemsWithStartPosition(found, 0, C.TIME_UNSET)
                 }
                 single != null && catalog.isFolder(single.mediaId) -> {
@@ -427,7 +428,12 @@ class DjTrotLibraryService : MediaLibraryService() {
                     val (queue, index) = catalog.queueFor(single.mediaId)
                     MediaSession.MediaItemsWithStartPosition(queue, index, startPositionMs)
                 }
-                else -> MediaSession.MediaItemsWithStartPosition(mediaItems.mapNotNull { catalog.resolve(it.mediaId) }, startIndex, startPositionMs)
+                // 앱 화면은 목록을 통째로 보낸다. 풀리지 않는 곡이 빠져도 고른 곡에서 시작한다.
+                else -> {
+                    val picked = mediaItems.getOrNull(startIndex)?.mediaId
+                    val queue = mediaItems.mapNotNull { catalog.resolve(it.mediaId) }
+                    MediaSession.MediaItemsWithStartPosition(queue, queue.indexOfFirst { it.mediaId == picked }.coerceAtLeast(0), startPositionMs)
+                }
             }
         }
 
@@ -451,7 +457,7 @@ class DjTrotLibraryService : MediaLibraryService() {
             controller: MediaSession.ControllerInfo,
             isForPlayback: Boolean,
         ): ListenableFuture<MediaSession.MediaItemsWithStartPosition> = scope.future {
-            MediaSession.MediaItemsWithStartPosition(catalog.children(Catalog.PICKS), 0, C.TIME_UNSET)
+            MediaSession.MediaItemsWithStartPosition(catalog.children(Shelf.PICKS), 0, C.TIME_UNSET)
         }
     }
 

@@ -19,25 +19,19 @@ import kotlinx.coroutines.sync.withLock
 
 /**
  * 미디어 센터·음성 검색·화면이 함께 보는 노래 목록(브라우즈 트리). DJ 트롯 서버의 선반(`/catalog`)과 내 드라이브 노래.
- *
- * ```
- * root
- * ├─ picks          DJ 트롯 추천
- * ├─ latest         새로 들어온 노래
- * ├─ styles         장르별 → style:{id}
- * └─ mine           내 드라이브 노래 (휴대폰 연결 뒤)
- * ```
- * 🔑 곡을 하나 고르면 그 곡이 있던 목록을 이어 튼다(`queueFor`). 마지막으로 본 목록을 기억한다.
+ * 트리의 모양과 ID는 [MediaPath]·[Shelf]에 있다.
+ * 🔑 앱 화면은 고른 곡과 그 목록을 통째로 큐로 보낸다. 미디어 센터처럼 곡 하나만 보내는 쪽은 그 곡을 마지막으로 본 목록을 이어 튼다(`queueFor`).
  * 🔑 선반 응답 하나에 모든 곡과 가사 시각이 들어 있다 — 1분 동안 다시 받지 않는다.
  */
 class Catalog(private val api: DjTrotApi, private val account: DeviceAccount) {
     private val songs = ConcurrentHashMap<String, TrotSong>()
     private val lists = ConcurrentHashMap<String, List<String>>()
-    private val parents = ConcurrentHashMap<String, String>()
+    /** 곡 ID → 그 곡을 마지막으로 보여 준 목록 ID. 곡 하나만 받은 재생 요청을 목록으로 늘릴 때 쓴다. */
+    private val lastSeenIn = ConcurrentHashMap<String, String>()
     private val fetch = Mutex()
     @Volatile private var cached: Pair<Long, CatalogResponse>? = null
 
-    fun root(): MediaItem = folder(ROOT, "DJ 트롯")
+    fun root(): MediaItem = folder(MediaPath.Root.id, "DJ 트롯")
 
     /** 루트 힌트 — 폴더는 격자, 곡은 목록으로 보이게 하고 검색을 지원한다고 알린다. */
     @OptIn(UnstableApi::class)
@@ -47,40 +41,42 @@ class Catalog(private val api: DjTrotApi, private val account: DeviceAccount) {
         putBoolean(SEARCH_SUPPORTED, true)
     }
 
-    suspend fun children(parentId: String): List<MediaItem> = when {
-        parentId == ROOT -> buildList {
-            add(folder(PICKS, "DJ 트롯 추천", "오늘의 트로트"))
-            add(folder(LATEST, "새로 들어온 노래", "방금 무대에 오른 노래"))
-            add(folder(STYLES, "장르별", "뽕짝·정통·세미·발라드"))
-            if (account.connected) add(folder(MINE, "내 드라이브 노래", "길에서 만든 노래"))
+    suspend fun children(shelf: Shelf): List<MediaItem> = children(MediaPath.Top(shelf))
+
+    suspend fun children(parentId: String): List<MediaItem> = MediaPath.parse(parentId)?.let { children(it) }.orEmpty()
+
+    private suspend fun children(path: MediaPath): List<MediaItem> = when (path) {
+        MediaPath.Root -> Shelf.entries.filter { it != Shelf.MINE || account.connected }.map(::folder)
+        is MediaPath.Top -> when (path.shelf) {
+            Shelf.STYLES -> styles()
+            Shelf.MINE -> remember(path.id, mine())
+            Shelf.PICKS, Shelf.LATEST -> remember(path.id, shelfSongs(path.id))
         }
-        parentId == STYLES -> catalog().shelves.filter { it.id.startsWith(STYLE_PREFIX) && it.songs.isNotEmpty() }
-            .map { folder(it.id, it.title, it.description.ifBlank { null }, it.songs.size, style = it.id.removePrefix(STYLE_PREFIX)) }
-        parentId == MINE -> remember(MINE, mine())
-        isShelf(parentId) -> remember(parentId, catalog().shelves.firstOrNull { it.id == parentId }?.songs.orEmpty())
-        else -> emptyList()
+        is MediaPath.Style -> remember(path.id, shelfSongs(path.id))
+        is MediaPath.Song -> emptyList()
     }
 
-    fun isFolder(mediaId: String) = mediaId == ROOT || mediaId == STYLES || mediaId == MINE || isShelf(mediaId)
-
-    private fun isShelf(id: String) = id == PICKS || id == LATEST || id.startsWith(STYLE_PREFIX)
+    fun isFolder(mediaId: String) = MediaPath.parse(mediaId).let { it != null && it !is MediaPath.Song }
 
     /** 곡 ID로 재생 가능한 항목(주소 포함)을 돌려준다. 한 번도 목록에서 본 적 없는 곡이면 null. */
-    fun resolve(mediaId: String): MediaItem? = songs[mediaId.removePrefix(SONG_PREFIX)]?.let(::playable)
+    fun resolve(mediaId: String): MediaItem? =
+        (MediaPath.parse(mediaId) as? MediaPath.Song)?.let { songs[it.songId] }?.let(::playable)
 
-    suspend fun item(mediaId: String): MediaItem? = when {
-        mediaId == ROOT -> root()
-        isFolder(mediaId) -> children(ROOT).firstOrNull { it.mediaId == mediaId } ?: folder(mediaId, mediaId)
-        else -> resolve(mediaId) ?: runCatching { api.catalogSong(mediaId.removePrefix(SONG_PREFIX)) }.getOrNull()?.let { register(it) }
+    suspend fun item(mediaId: String): MediaItem? = when (val path = MediaPath.parse(mediaId)) {
+        MediaPath.Root -> root()
+        is MediaPath.Top -> folder(path.shelf)
+        is MediaPath.Style -> styles().firstOrNull { it.mediaId == mediaId }
+        is MediaPath.Song -> resolve(mediaId) ?: runCatching { api.catalogSong(path.songId) }.getOrNull()?.let(::keep)
+        null -> null
     }
 
-    /** 고른 곡이 들어 있던 목록 전체와 그 안의 위치. 목록을 모르면 그 곡 하나. */
+    /** 고른 곡을 마지막으로 보여 준 목록 전체와 그 안의 위치. 목록을 모르면 그 곡 하나. */
     fun queueFor(mediaId: String): Pair<List<MediaItem>, Int> {
-        val id = mediaId.removePrefix(SONG_PREFIX)
-        val list = parents[id]?.let { lists[it] }
+        val id = (MediaPath.parse(mediaId) as? MediaPath.Song)?.songId ?: return emptyList<MediaItem>() to 0
+        val list = lastSeenIn[id]?.let { lists[it] }
         if (list != null) {
             val items = list.mapNotNull { songs[it]?.let(::playable) }
-            val index = items.indexOfFirst { it.mediaId == SONG_PREFIX + id }
+            val index = items.indexOfFirst { it.mediaId == mediaId }
             if (index >= 0) return items to index
         }
         return listOfNotNull(resolve(mediaId)) to 0
@@ -90,14 +86,12 @@ class Catalog(private val api: DjTrotApi, private val account: DeviceAccount) {
     fun lyrics(songId: String?): List<LyricLine> =
         songId?.let { songs[it] }?.lyricSync?.takeIf { it.state == "ready" }?.lines.orEmpty()
 
-    /** 드라이브에서 새로 만든 곡을 목록에 넣고 재생 항목으로 돌려준다. */
-    fun register(song: TrotSong, parent: String = MINE): MediaItem {
-        songs[song.id] = song
-        if (parents[song.id] == null) {
-            parents[song.id] = parent
-            lists[parent] = listOf(song.id) + lists[parent].orEmpty().filter { it != song.id }
-        }
-        return playable(song)
+    /** 드라이브에서 새로 만든 곡을 내 노래 맨 앞에 넣고 재생 항목으로 돌려준다. */
+    fun register(song: TrotSong): MediaItem {
+        val mine = Shelf.MINE.id
+        lastSeenIn.putIfAbsent(song.id, mine)
+        lists[mine] = listOf(song.id) + lists[mine].orEmpty().filter { it != song.id }
+        return keep(song)
     }
 
     /**
@@ -114,19 +108,32 @@ class Catalog(private val api: DjTrotApi, private val account: DeviceAccount) {
         cached?.takeIf { now - it.first < CACHE_MS }?.second ?: api.catalog().also { cached = now to it }
     }
 
+    /** 🔑 선반 ID는 미디어 ID와 같다(`picks`, `latest`, `style:{id}`). */
+    private suspend fun shelfSongs(id: String): List<TrotSong> = catalog().shelves.firstOrNull { it.id == id }?.songs.orEmpty()
+
+    private suspend fun styles(): List<MediaItem> = catalog().shelves.mapNotNull { shelf ->
+        val path = MediaPath.parse(shelf.id) as? MediaPath.Style ?: return@mapNotNull null
+        if (shelf.songs.isEmpty()) return@mapNotNull null
+        folder(path.id, shelf.title, shelf.description.ifBlank { null }, shelf.songs.size, style = path.style)
+    }
+
     private suspend fun mine(): List<TrotSong> = runCatching {
         account.authorized { token -> api.songs(token) }.songs.mapNotNull { it.song }
     }.getOrDefault(emptyList())
 
-    private fun remember(parentId: String, found: List<TrotSong>): List<MediaItem> {
-        found.forEach { songs[it.id] = it }
-        lists[parentId] = found.map { it.id }
-        found.forEach { parents[it.id] = parentId }
-        return found.map(::playable)
+    private fun remember(listId: String, found: List<TrotSong>): List<MediaItem> {
+        lists[listId] = found.map { it.id }
+        found.forEach { lastSeenIn[it.id] = listId }
+        return found.map(::keep)
+    }
+
+    private fun keep(song: TrotSong): MediaItem {
+        songs[song.id] = song
+        return playable(song)
     }
 
     private fun playable(song: TrotSong): MediaItem = MediaItem.Builder()
-        .setMediaId(SONG_PREFIX + song.id)
+        .setMediaId(MediaPath.Song(song.id).id)
         .setUri(api.absolute(song.audio.url))
         .setMimeType(MimeTypes.AUDIO_MPEG)
         .setMediaMetadata(
@@ -154,6 +161,8 @@ class Catalog(private val api: DjTrotApi, private val account: DeviceAccount) {
         )
         .build()
 
+    private fun folder(shelf: Shelf): MediaItem = folder(shelf.id, shelf.title, shelf.subtitle)
+
     private fun folder(id: String, title: String, subtitle: String? = null, songs: Int? = null, style: String? = null): MediaItem = MediaItem.Builder()
         .setMediaId(id)
         .setMediaMetadata(
@@ -170,19 +179,13 @@ class Catalog(private val api: DjTrotApi, private val account: DeviceAccount) {
         .build()
 
     companion object {
-        const val ROOT = "root"
-        const val PICKS = "picks"
-        const val LATEST = "latest"
-        const val STYLES = "styles"
-        const val STYLE_PREFIX = "style:"
-        const val MINE = "mine"
-        const val SONG_PREFIX = "song:"
         const val EXTRA_SONG_ID = "djtrot.songId"
         const val EXTRA_STYLE = "djtrot.style"
         const val EXTRA_TOPIC = "djtrot.topic"
         const val EXTRA_TOPIC_LABEL = "djtrot.topicLabel"
         const val EXTRA_MADE = "djtrot.made"
         const val EXTRA_MADE_AT = "djtrot.madeAt"
+        /** 검색 결과도 목록 하나로 기억한다. 트리에는 없는 ID다. */
         private const val SEARCH = "search"
         private const val CACHE_MS = 60_000L
         private const val SEARCH_SUPPORTED = "android.media.browse.SEARCH_SUPPORTED"
