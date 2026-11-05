@@ -4,6 +4,11 @@
     <!-- 🔴 Pleos Connect 차량과 에뮬레이터는 Android 14(API 34)다. targetSdk를 올리면 차에 없는 플랫폼 동작을 따르게 된다. -->
     <issue id="OldTargetApi" severity="ignore" />
 
+    <!-- 새 버전이 나왔다는 알림. 코드가 그대로여도 날짜에 따라 빌드가 깨진다. 버전 올리기는 Dependabot PR이 맡는다. -->
+    <issue id="AndroidGradlePluginVersion" severity="ignore" />
+    <issue id="GradleDependency" severity="ignore" />
+    <issue id="NewerVersionAvailable" severity="ignore" />
+
     <!-- ⚠️ 적응형 아이콘을 버전 없는 mipmap-anydpi로 옮기면 AGP 9.4 리소스 병합에서 아이콘이 빠져 빌드가 실패한다. -v26 폴더를 그대로 둔다. -->
     <issue id="ObsoleteSdkInt">
         <ignore path="src/main/res/mipmap-anydpi-v26" />
