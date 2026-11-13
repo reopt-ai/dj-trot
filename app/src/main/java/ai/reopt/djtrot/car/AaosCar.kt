@@ -12,15 +12,17 @@ import android.os.Build
 import android.util.Log
 
 /**
- * AAOS 표준 Car API — 주행 중 UX 제한(CarUxRestrictions)과 기어(GEAR_SELECTION).
+ * AAOS 표준 Car API — 주행 중 UX 제한(CarUxRestrictions), 기어(GEAR_SELECTION), 충전구(EV_CHARGE_PORT_OPEN).
  * 🔑 매니페스트에서 화면을 distractionOptimized로 선언했으므로, 제한이 걸리면 화면이 스스로 긴 글·목록·버튼을 줄인다
  *    (Pleos Driving Restriction Development Guide).
  * 🔑 기어는 Pleos Vehicle SDK의 Gear API가 폐기 예정이라("use the Google GEAR_SELECTION property") 표준 속성으로 읽는다.
+ * 🔑 충전구도 같은 까닭이다 — Pleos `registerEvChargePortOpen`이 폐기 예정이라 표준 속성으로 읽는다. 전기차가 아니면 값이 오지 않는다.
  */
 class AaosCar(
     private val context: Context,
     private val onRestrictions: (UxState) -> Unit,
     private val onGear: (GearState) -> Unit,
+    private val onChargePort: (Boolean) -> Unit = {},
 ) {
     /** 주행 최적화 요구 여부와 지금 걸린 제한 항목. */
     data class UxState(val required: Boolean, val flags: Int, val maxTextLength: Int)
@@ -32,6 +34,13 @@ class AaosCar(
             (value.value as? Int)?.let { onGear(gearState(it)) }
         }
         override fun onErrorEvent(propertyId: Int, areaId: Int) = Log.w(TAG, "기어 속성 오류 $propertyId").let { }
+    }
+
+    private val chargePortCallback = object : CarPropertyManager.CarPropertyEventCallback {
+        override fun onChangeEvent(value: CarPropertyValue<*>) {
+            (value.value as? Boolean)?.let(onChargePort)
+        }
+        override fun onErrorEvent(propertyId: Int, areaId: Int) = Log.w(TAG, "충전구 속성 오류 $propertyId").let { }
     }
 
     fun start() {
@@ -48,6 +57,11 @@ class AaosCar(
             @Suppress("DEPRECATION")
             manager.registerCallback(gearCallback, VehiclePropertyIds.GEAR_SELECTION, CarPropertyManager.SENSOR_RATE_ONCHANGE)
         }.onFailure { Log.w(TAG, "기어 속성을 읽을 수 없어요", it) }
+        runCatching {
+            val manager = connected.getCarManager(Car.PROPERTY_SERVICE) as CarPropertyManager
+            @Suppress("DEPRECATION")
+            manager.registerCallback(chargePortCallback, VehiclePropertyIds.EV_CHARGE_PORT_OPEN, CarPropertyManager.SENSOR_RATE_ONCHANGE)
+        }.onFailure { Log.w(TAG, "충전구 속성을 읽을 수 없어요", it) }
     }
 
     private companion object {

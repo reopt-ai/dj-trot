@@ -38,7 +38,9 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.guava.future
 import kotlinx.coroutines.withTimeoutOrNull
@@ -113,6 +115,27 @@ class DjTrotLibraryService : MediaLibraryService() {
                 launch { talk(line) }
             }
         }
+        // 길 안내를 시작하면 이번 길을 여는 말을, 경유지에 닿으면 짧은 인사를 한다.
+        scope.launch {
+            app.car.departures.collect { departure ->
+                if (!app.djTalks || !player.isPlaying) return@collect
+                val line = DjScript.departure(departure)
+                app.dj.update { it.say(line) }
+                launch { talk(line) }
+            }
+        }
+        scope.launch {
+            app.car.waypoints.collect { arrival ->
+                if (!app.djTalks || !player.isPlaying) return@collect
+                val line = DjScript.waypoint(arrival)
+                app.dj.update { it.say(line) }
+                launch { talk(line) }
+            }
+        }
+        // 🔑 말로 사연을 듣는 동안은 DJ가 입을 닫고 음악도 줄인다 — 마이크에 노래가 섞이지 않게.
+        scope.launch {
+            app.mic.state.map { it.listening }.distinctUntilChanged().collect { listening -> if (listening) hush() else duck() }
+        }
         // 🔑 DJ가 말하는 동안 음악을 줄인다 — 기기 TTS든 서버 음성이든.
         scope.launch { app.voice.speaking.collect { duck() } }
         // 백그라운드에서 시스템이 바인딩해 뜬 경우 시작 제한에 걸릴 수 있다 — 그때는 Media3의 포그라운드 처리에 맡긴다.
@@ -162,7 +185,7 @@ class DjTrotLibraryService : MediaLibraryService() {
         val seed = item.mediaId.hashCode()
         briefJob?.cancel()
         briefJob = scope.launch {
-            val brief = runCatching { app.api.brief(drive.toInput(now), voice = true, nowPlaying = nowPlaying) }
+            val brief = runCatching { app.api.brief(drive.toInput(now, app.spoken), voice = true, nowPlaying = nowPlaying) }
                 .onFailure { Log.i(TAG, "DJ 브리프 대신 기기 멘트: ${it.message}") }
                 .getOrNull()
             if (player.currentMediaItem?.mediaId != item.mediaId) return@launch
@@ -187,15 +210,16 @@ class DjTrotLibraryService : MediaLibraryService() {
 
     /**
      * 멘트를 소리 내어 읽는다. 화면에는 이미 보이고 있다.
-     * 🔑 내비 안내 직전·차선 변경 중이면 풀릴 때까지 기다리고, [HOLD_MAX_MS]가 넘으면 읽지 않는다.
+     * 🔑 내비 안내 직전·차선 변경 중·말로 사연을 듣는 중이면 풀릴 때까지 기다리고, [HOLD_MAX_MS]가 넘으면 읽지 않는다.
      *    풀린 뒤에도 [SETTLE_MS] 쉬고 말한다 — 안내 음성이 끝나자마자 끼어들지 않는다.
      *    기다리는 사이 곡이 바뀌었거나 멈췄으면 읽지 않는다.
      * 🔑 기기 TTS는 음악을 먼저 줄이고 [LEAD_IN_MS] 뒤에 말한다(라디오 진행처럼, Pleos 음성 앞 여백 권장).
      */
     private suspend fun talk(line: String, itemId: String? = null, clipUrl: String? = null) {
         val quiet = withTimeoutOrNull(HOLD_MAX_MS) {
-            while (app.car.state.value.holdTalk) {
+            while (app.car.state.value.holdTalk || app.mic.state.value.listening) {
                 app.car.state.first { !it.holdTalk }
+                app.mic.state.first { !it.listening }
                 delay(SETTLE_MS)
             }
         }
@@ -219,7 +243,7 @@ class DjTrotLibraryService : MediaLibraryService() {
 
     /** 🔑 음악 크기는 끊기지 않게 [FADE_MS]에 걸쳐 바꾼다. */
     private fun duck() {
-        val target = if (clipOn || leadIn || app.voice.speaking.value) DUCKED else 1f
+        val target = if (clipOn || leadIn || app.voice.speaking.value || app.mic.state.value.listening) DUCKED else 1f
         if (target == fadeTarget) return
         fadeTarget = target
         fade?.cancel()
@@ -247,7 +271,7 @@ class DjTrotLibraryService : MediaLibraryService() {
         val nowPlaying = item.mediaMetadata.nowPlaying()
         val drive = app.car.state.value
         briefJob = scope.launch {
-            runCatching { app.api.brief(drive.toInput(LocalTime.now()), voice = false, nowPlaying = nowPlaying) }
+            runCatching { app.api.brief(drive.toInput(LocalTime.now(), app.spoken), voice = false, nowPlaying = nowPlaying) }
                 .onSuccess { brief -> app.dj.update { it.suggest(SongRequest.of(brief.song)) } }
                 .onFailure { Log.i(TAG, "신청곡 제안을 새로 받지 못했어요: ${it.message}") }
         }

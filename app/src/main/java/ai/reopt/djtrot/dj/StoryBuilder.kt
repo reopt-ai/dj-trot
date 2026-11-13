@@ -3,6 +3,7 @@ package ai.reopt.djtrot.dj
 import ai.reopt.djtrot.api.BriefSong
 import ai.reopt.djtrot.api.Labels
 import ai.reopt.djtrot.car.DriveContext
+import ai.reopt.djtrot.car.PlaceKind
 import java.time.LocalTime
 
 /** 드라이브 노래 만들기 요청(`POST /songs`)에 넣을 선택지와 사연. 서버 DJ 브리프가 제안하고, 없으면 [StoryBuilder]가 쓴다. */
@@ -30,7 +31,12 @@ object StoryBuilder {
     const val MAX_STORY = 200
 
     fun build(drive: DriveContext, now: LocalTime, spoken: String? = null): SongRequest {
-        val words = listOfNotNull(drive.destination?.name, drive.destination?.address, spoken).joinToString(" ")
+        val place = when (drive.destination?.kind) {
+            PlaceKind.HOME -> "집"
+            PlaceKind.OFFICE -> "회사"
+            null -> null
+        }
+        val words = listOfNotNull(drive.destination?.name, drive.destination?.address, place, spoken).joinToString(" ")
         return SongRequest(topic = topic(words), style = style(drive, now), story = story(drive, now, spoken))
     }
 
@@ -47,13 +53,14 @@ object StoryBuilder {
 
     fun style(drive: DriveContext, now: LocalTime): String = when {
         drive.drivingMode == "SPORT" -> "ppongjjak"
+        drive.raining || drive.fog -> "ballad"
         DjScript.timeOfDay(now) in setOf(DjScript.TimeOfDay.NIGHT, DjScript.TimeOfDay.DAWN) -> "ballad"
         drive.drivingMode == "ECO" -> "classic"
         else -> "dance"
     }
 
     fun story(drive: DriveContext, now: LocalTime, spoken: String?): String {
-        val road = DjScript.timeOfDay(now).road
+        val road = (if (drive.raining) "비 오는 " else "") + DjScript.timeOfDay(now).road
         val from = drive.region
         val to = drive.destination?.name
         val route = when {

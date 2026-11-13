@@ -157,7 +157,8 @@ private fun DjContent(app: DjTrotApp, player: Player?, compact: Boolean) {
     // 가사 시각은 노래(trot-song/1)에 들어 있다. 정렬되지 않은 곡은 빈 목록이다.
     val lyrics = remember(ui.songId) { app.catalog.lyrics(ui.songId) }
     // 🔑 이 길의 신청곡은 서버 DJ 브리프(AI)의 제안. 아직 없거나 오프라인이면 기기에서 쓴다.
-    val fallback = remember(drive, now) { StoryBuilder.build(drive, now) }
+    val spoken = dj.freshSpoken()
+    val fallback = remember(drive, now, spoken) { StoryBuilder.build(drive, now, spoken) }
     val request = dj.freshSuggestion() ?: fallback
     val driving = !drive.stopped || drive.restricted
     // 가사를 칠하는 동안은 더 자주 읽어 글자가 매끄럽게 채워지게 한다.

@@ -8,6 +8,9 @@ enum class GearState(val label: String) {
     UNKNOWN("확인 중"),
 }
 
+/** 내비 즐겨찾기가 알려 주는 곳의 종류. DJ가 "집으로 가는 길"이라고 부를 수 있다. */
+enum class PlaceKind { HOME, OFFICE }
+
 data class Destination(
     val name: String,
     val address: String? = null,
@@ -15,7 +18,55 @@ data class Destination(
     val remainMinutes: Int? = null,
     /** 남은 거리(km). */
     val remainKm: Double? = null,
+    /** 즐겨찾기의 집·회사와 같은 곳이면 그 종류. */
+    val kind: PlaceKind? = null,
 )
+
+/**
+ * 내비 즐겨찾기 한 곳 — 목적지가 집·회사인지 알아보는 데만 쓴다.
+ * 🔴 기기 밖으로 나가지 않는다. 서버에는 지금처럼 목적지 이름과 주소만 간다.
+ */
+data class Bookmark(val kind: PlaceKind, val poiId: String = "", val name: String = "", val address: String = "") {
+    fun matches(poiId: String, name: String, address: String): Boolean = when {
+        this.poiId.isNotBlank() && poiId.isNotBlank() -> this.poiId == poiId
+        this.address.isNotBlank() && address.isNotBlank() -> this.address.trim() == address.trim()
+        else -> this.name.isNotBlank() && this.name.trim() == name.trim()
+    }
+}
+
+/** 길 안내를 시작할 때 내비가 알려 주는 이번 길. 값이 없으면 null. */
+data class Departure(
+    val name: String,
+    /** 예상 시간(분). */
+    val minutes: Int? = null,
+    /** 전체 거리(km). */
+    val km: Double? = null,
+    val kind: PlaceKind? = null,
+)
+
+/** 가는 길의 정체 — [JAM_MINUTES]분 넘게 막힐 때만 만든다. */
+data class Traffic(
+    /** 정체 구간을 지나는 데 걸리는 시간(분). */
+    val jamMinutes: Int,
+    /** 가장 오래 막히는 도로 이름. */
+    val road: String? = null,
+    val accident: Boolean = false,
+    val roadwork: Boolean = false,
+) {
+    companion object {
+        const val JAM_MINUTES = 5
+
+        /** 🔑 내비의 정체 시간은 초다(Pleos NaviHelper `TrafficCongestionSummary`). 짧은 정체는 말할 거리가 아니다. */
+        fun of(jamSeconds: Long, road: String?, accident: Boolean, roadwork: Boolean): Traffic? {
+            val minutes = ((jamSeconds + 30) / 60).toInt()
+            if (minutes < JAM_MINUTES && !accident) return null
+            return Traffic(minutes, road?.trim()?.takeIf { it.isNotEmpty() }, accident, roadwork)
+        }
+    }
+}
+
+/** 곧 지나는 곳 — 내비 TBT가 알려 준다. */
+enum class RoadAhead { TUNNEL, TOLL, REST_AREA }
 
 /** 목적지에 닿았을 때 내비가 알려 주는 이번 길. 값이 없으면 null. */
 data class Arrival(
@@ -44,6 +95,26 @@ data class DriveContext(
     val guidanceSoon: Boolean = false,
     /** 방향지시등이 켜져 있다(차선 변경·회전 중). */
     val signaling: Boolean = false,
+    /** 가는 길이 막힌다(내비 경로 상태). */
+    val traffic: Traffic? = null,
+    /** 곧 터널·톨게이트·휴게소를 지난다. 지나고 나면 비운다. */
+    val ahead: RoadAhead? = null,
+    /** 어린이보호구역이 가깝다. DJ는 곡 이름만 말한다. */
+    val schoolZone: Boolean = false,
+    /** 목적지 없이 달리는 중(내비 FREE_DRIVE). */
+    val freeDrive: Boolean = false,
+    /** 시동 뒤 달린 시간(분, Pleos Vehicle Odometer). */
+    val tripMinutes: Int? = null,
+    /** 크루즈 컨트롤로 달리는 중. */
+    val cruising: Boolean = false,
+    /** 충전구가 열려 있다 — 서 있을 때는 충전 중으로 본다. */
+    val chargePortOpen: Boolean = false,
+    /** 앞 안개등이 켜져 있다. */
+    val fog: Boolean = false,
+    /** 앞 유리 와이퍼가 계속 움직인다 — 비나 눈이 온다. */
+    val raining: Boolean = false,
+    /** 운전석 말고도 누가 타고 있다. 🔴 기기 멘트에만 쓰고 서버로 보내지 않는다. */
+    val company: Boolean = false,
 ) {
     val region: String? get() = Region.label(currentAddress ?: destination?.address)
 
@@ -69,9 +140,17 @@ data class DriveContext(
     fun brief(text: String): String =
         if (limitText && maxTextLength in 1 until text.length) text.take(maxTextLength - 1).trimEnd() + "…" else text
 
-    private companion object {
+    /** 쉬어 가자고 권할 만큼 오래 달렸다. */
+    val longDrive: Boolean get() = (tripMinutes ?: 0) >= LONG_DRIVE_MINUTES
+
+    /** 서서 충전하는 중으로 본다. */
+    val charging: Boolean get() = chargePortOpen && gear == GearState.PARK
+
+    companion object {
+        const val LONG_DRIVE_MINUTES = 120
+
         // android.car.drivingstate.CarUxRestrictions 값 — 순수 모델이라 상수만 옮겨 둔다.
-        const val UX_LIMIT_STRING_LENGTH = 4
-        const val UX_NO_SETUP = 64
+        private const val UX_LIMIT_STRING_LENGTH = 4
+        private const val UX_NO_SETUP = 64
     }
 }

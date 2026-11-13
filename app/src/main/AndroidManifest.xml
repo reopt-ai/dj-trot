@@ -12,18 +12,26 @@
 
     <!-- AAOS 표준: 기어(GEAR_SELECTION) -->
     <uses-permission android:name="android.car.permission.CAR_POWERTRAIN" />
+    <!-- AAOS 표준: 충전구(EV_CHARGE_PORT_OPEN) — 서서 충전하는 동안의 DJ 멘트 -->
+    <uses-permission android:name="android.car.permission.CAR_ENERGY_PORTS" />
 
     <!-- Pleos SDK: 사용하는 도메인의 읽기 권한만 선언한다 -->
-    <!-- DrivingMode -->
+    <!-- DrivingMode·크루즈 컨트롤, Odometer(달린 시간) -->
     <uses-permission android:name="pleos.car.permission.CAR_DRIVE" />
-    <!-- EvBattery·Fuel -->
+    <!-- EvBattery(잔량) -->
     <uses-permission android:name="pleos.car.permission.CAR_ENERGY" />
-    <!-- TurnSignal(차선 변경 중에는 DJ가 말을 미룬다) -->
+    <!-- TurnSignal(차선 변경 중에는 DJ가 말을 미룬다), 앞 안개등 -->
     <uses-permission android:name="pleos.car.permission.CAR_LIGHTS" />
-    <!-- NaviHelper 조회(get*Info)와 안내 이벤트(TBT, 주의 구간, 카메라, 도착) -->
+    <!-- Wiper(비 오는 길) -->
+    <uses-permission android:name="pleos.car.permission.CAR_WINDOWS" />
+    <!-- Seat 착석(동승자가 있는지만 본다. 기기 멘트에만 쓰고 서버로 보내지 않는다) -->
+    <uses-permission android:name="pleos.car.permission.CAR_SEATS" />
+    <!-- NaviHelper 조회(get*Info)와 안내 이벤트(TBT, 주의 구간, 카메라, 출발, 경유지, 도착, 정체, 즐겨찾기) -->
     <uses-permission android:name="pleos.car.permission.NAVI_ROUTE" />
     <!-- TextToSpeech(DJ 목소리) -->
     <uses-permission android:name="pleos.car.permission.TTS_SERVICE" />
+    <!-- SpeechToText(말로 넣는 사연) -->
+    <uses-permission android:name="pleos.car.permission.STT_SERVICE" />
 
     <!-- 🔑 appCategory=audio: Pleos Music/Audio 카테고리 필수 선언 -->
     <application

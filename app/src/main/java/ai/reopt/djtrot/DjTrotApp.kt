@@ -10,6 +10,8 @@ import ai.reopt.djtrot.dj.DjVoice
 import ai.reopt.djtrot.dj.FallbackDjVoice
 import ai.reopt.djtrot.dj.SongOrders
 import ai.reopt.djtrot.dj.SongRequest
+import ai.reopt.djtrot.dj.StoryMic
+import ai.reopt.djtrot.dj.toInput
 import ai.reopt.djtrot.playback.Catalog
 import android.app.Application
 import androidx.core.content.edit
@@ -18,6 +20,7 @@ import java.time.Instant
 import java.time.LocalTime
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 /** DJ가 한 말 하나와 그 시각. */
@@ -37,6 +40,10 @@ data class DjState(
     val suggestion: SongRequest? = null,
     /** [suggestion]을 받은 때. */
     val suggestedAt: Instant? = null,
+    /** 운전자가 말로 넣은 사연(Pleos SpeechToText). */
+    val spoken: String? = null,
+    /** [spoken]을 들은 때. */
+    val spokenAt: Instant? = null,
 ) {
     /** 새 멘트 — 방금 한 말은 [earlier] 맨 앞으로 밀려난다. 같은 말을 다시 하면 그대로다. */
     fun say(text: String, at: LocalTime = LocalTime.now()): DjState {
@@ -50,6 +57,16 @@ data class DjState(
     /** 아직 쓸 만한 제안. 사연에 시각과 동네가 들어 있어서, 멈춰 둔 사이 [STALE]이 지나면 버린다. */
     fun freshSuggestion(now: Instant = Instant.now()): SongRequest? =
         suggestion?.takeIf { suggestedAt != null && Duration.between(suggestedAt, now) < STALE }
+
+    /** 말로 넣은 새 사연 — 앞선 제안은 이 말을 모르므로 버린다. */
+    fun hear(text: String, at: Instant = Instant.now()): DjState = copy(spoken = text, spokenAt = at, suggestion = null, suggestedAt = null)
+
+    /** 말로 넣은 사연을 다 썼다(노래를 맡겼다). */
+    fun forget(): DjState = copy(spoken = null, spokenAt = null)
+
+    /** 아직 쓸 만한 말 — 제안과 같이 [STALE]이 지나면 버린다. */
+    fun freshSpoken(now: Instant = Instant.now()): String? =
+        spoken?.takeIf { spokenAt != null && Duration.between(spokenAt, now) < STALE }
 
     companion object {
         const val KEEP = 3
@@ -66,6 +83,22 @@ class DjTrotApp : Application() {
     val car by lazy { CarSignals(this) }
     val voice: DjVoice by lazy { FallbackDjVoice(this) }
     val dj = MutableStateFlow(DjState())
+    val mic by lazy { StoryMic(this, ::wish) }
+
+    /** 지금 쓸 수 있는 말로 넣은 사연. 없으면 빈 글. */
+    val spoken: String get() = dj.value.freshSpoken().orEmpty()
+
+    /**
+     * 말로 넣은 사연을 받았다 — 화면은 바로 기기에서 쓴 사연([StoryBuilder])을 보이고,
+     * 서버 DJ 브리프가 답하면 그 말을 담은 제안으로 바꾼다.
+     */
+    private fun wish(spoken: String) {
+        dj.update { it.hear(spoken) }
+        scope.launch {
+            runCatching { api.brief(car.state.value.toInput(LocalTime.now(), spoken), voice = false) }
+                .onSuccess { brief -> dj.update { if (it.spoken == spoken) it.suggest(SongRequest.of(brief.song)) else it } }
+        }
+    }
 
     override fun onCreate() {
         super.onCreate()

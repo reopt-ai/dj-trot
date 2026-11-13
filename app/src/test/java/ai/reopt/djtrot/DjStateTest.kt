@@ -33,4 +33,13 @@ class DjStateTest {
         assertNull(state.freshSuggestion(at.plus(DjState.STALE)))
         assertNull(DjState().freshSuggestion(at))
     }
+
+    @Test fun `말로 넣은 사연은 앞선 제안을 버리고 오래되면 잊는다`() {
+        val at = Instant.parse("2026-10-24T17:43:00Z")
+        val state = DjState().suggest(SongRequest("cheer", "ballad", "출근길"), at).hear("어머니 칠순이에요", at)
+        assertNull(state.freshSuggestion(at))
+        assertEquals("어머니 칠순이에요", state.freshSpoken(at.plusSeconds(60)))
+        assertNull(state.freshSpoken(at.plus(DjState.STALE)))
+        assertNull(state.forget().freshSpoken(at))
+    }
 }

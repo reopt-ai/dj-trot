@@ -58,14 +58,18 @@ sequenceDiagram
 
 | SDK / API | 이 앱에서 하는 일 | 코드 |
 | --- | --- | --- |
-| Pleos **NaviHelper** | 현재 주소, 목적지, 남은 시간. DJ 멘트와 사연의 재료. 회전·주의 구간·단속 카메라 안내 직전에는 DJ가 말을 미루고, 도착하면 걸린 시간과 거리로 마무리 인사 | `car/CarSignals.kt` |
-| Pleos **Vehicle** | 배터리 잔량, 주행 모드. 방향지시등이 켜진 동안 DJ가 말을 미룸 | `car/CarSignals.kt` |
+| Pleos **NaviHelper** | 현재 주소, 목적지, 남은 시간. DJ 멘트와 사연의 재료. 회전·주의 구간·단속 카메라 안내 직전에는 DJ가 말을 미루고, 출발·경유지·도착에 맞춰 인사. 가는 길의 정체, 곧 지나는 터널·톨게이트·휴게소, 목적지가 즐겨찾기의 집·회사인지, 목적지 없이 달리는 중인지도 멘트에 씀. 어린이보호구역에서는 곡 이름만 말함 | `car/CarSignals.kt` |
+| Pleos **Vehicle** | 배터리 잔량, 주행 모드, 시동 뒤 달린 시간(두 시간이 넘으면 쉬어 가자고 함), 크루즈 컨트롤, 앞 안개등, 와이퍼(비 오는 길), 동승자 유무. 방향지시등이 켜진 동안 DJ가 말을 미룸 | `car/CarSignals.kt` |
 | Pleos **TextToSpeech** | DJ 목소리. 말하는 동안 음악을 줄이고, 쓸 수 없으면 안드로이드 TTS로 바꿈 | `dj/DjVoice.kt` |
+| Pleos **SpeechToText** | 말로 넣는 사연. 신청곡 카드의 마이크를 누르고 말하면 그 말로 사연과 주제를 다시 씀. 듣는 동안 DJ는 말을 멈추고 음악을 줄임 | `dj/StoryMic.kt` |
 | AAOS **CarUxRestrictions** | 주행 중 화면 제한 | `car/AaosCar.kt` |
 | AAOS **GEAR_SELECTION** | 주차·주행 판단 | `car/AaosCar.kt` |
+| AAOS **EV_CHARGE_PORT_OPEN** | 서서 충전하는 동안의 DJ 멘트 | `car/AaosCar.kt` |
 | Media3 **MediaLibraryService** | 시스템 미디어, 스티어링 휠, 음성 검색 연결 | `playback/DjTrotLibraryService.kt` |
 
 SDK마다 따로 실패할 수 있어서(차종, 에뮬레이터, 권한) 하나가 안 되면 그 값만 비우고 나머지로 동작합니다.
+
+새로 더한 신호(정체, 터널·톨게이트·휴게소, 집·회사, 달린 시간, 크루즈, 안개등, 비, 동승자, 충전)는 지금 기기 멘트(`dj/DjScript.kt`)와 기기 사연(`dj/StoryBuilder.kt`)에만 씁니다. 서버로 가는 드라이브 맥락은 그대로입니다. 즐겨찾기와 동승자 유무는 기기 밖으로 나가지 않습니다.
 
 ## Pleos 음악 앱 요건
 
@@ -129,9 +133,9 @@ adb shell am start -n ai.reopt.djtrot/.ui.MainActivity
 ./gradlew :app:installDebug -Pdjtrot.api=http://10.0.2.2:8787/api/v1/dj-trot
 ```
 
-### Pleos TTS 서버 모드(선택)
+### Pleos TTS·STT 서버 모드(선택)
 
-Pleos Playground 프로젝트의 Client ID/Secret이 있으면 TTS가 서버 우선(하이브리드) 모드로 동작합니다. 없으면 온디바이스 모드로만 말합니다. 값은 저장소가 아니라 사용자 Gradle 설정에 둡니다.
+Pleos Playground 프로젝트의 Client ID/Secret이 있으면 TTS와 STT가 서버 우선(하이브리드) 모드로 동작합니다. 없으면 온디바이스 모드로만 말합니다. 값은 저장소가 아니라 사용자 Gradle 설정에 둡니다.
 
 ```properties
 # ~/.gradle/gradle.properties
@@ -228,7 +232,8 @@ docs/                구조 설명, 공모전·Pleos 요건 정리, README 이�
 - **운영 서버 준비 중**: 기본 빌드가 보는 운영 서버 주소는 아직 열리지 않았습니다(2026-10). 그동안은 `-Pdjtrot.api`로 개발 서버를 지정합니다.
 - **에뮬레이터에서 DJ 목소리가 나지 않음**: 에뮬레이터의 Pleos TTS 온디바이스 엔진이 `ON_DEVICE_ENGINE_ERROR`를 냅니다. 안드로이드 TTS도 같은 음성 서비스를 써서 소리가 나지 않습니다. 자막은 정상으로 나오고, Client ID/Secret을 넣으면 서버 모드로 말합니다.
 - **주행 모드 값 없음(에뮬레이터)**: 에뮬레이터가 DrivingMode 속성을 지원하지 않아 화면에서 생략합니다.
-- **말로 사연 넣기는 아직 없음**: 서버 계약에는 말로 넣은 사연(`spoken`) 자리가 있고, Pleos SpeechToText 연결은 다음 단계입니다.
+- **말로 사연 넣기(에뮬레이터)**: Pleos SpeechToText로 듣습니다. 에뮬레이터에서는 맥의 마이크를 에뮬레이터에 열어 줘야 하고, 온디바이스 엔진이 없으면 Client ID/Secret을 넣은 서버 모드로만 듣습니다. 듣지 못하면 카드에 까닭을 보이고 사연은 그대로 둡니다.
+- **새 차량 신호는 실차 확인 전**: 정체, 터널·톨게이트·휴게소, 달린 시간, 크루즈, 안개등, 와이퍼, 좌석, 충전구는 차종과 내비 구현에 따라 값이 오지 않을 수 있습니다. 오지 않으면 그 멘트만 나오지 않습니다.
 - **Gleo 음성 명령은 아직 없음**: Pleos 문서상 Media3 검색만으로 Gleo에 붙는 방식은 준비 중입니다. 지금 Gleo에 기능을 내주려면 Gleo Interface(`assets/schema.json`)를 선언하고 42dot 승인을 받아야 합니다.
 - **내비 안내 이벤트(에뮬레이터)**: 안내 직전 미루기는 내비가 TBT·주의 구간·카메라 이벤트를 보낼 때만 동작합니다. 어떤 이벤트를 보내는지는 내비 구현마다 다릅니다(Pleos NaviHelper 문서).
 - **홈 화면 미디어 위젯**: Pleos Media Center 템플릿을 쓴 앱만 홈 위젯과 시스템 미디어 목록에 자동으로 올라갑니다. DJ 트롯은 자체 화면을 쓰므로 런처와 독에서 엽니다.
