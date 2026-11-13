@@ -13,6 +13,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import java.time.LocalTime
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.update
 import ai.reopt.djtrot.dj.SongRequest
 import ai.reopt.djtrot.playback.Catalog
 import ai.reopt.djtrot.playback.Shelf
@@ -45,6 +46,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -95,7 +97,11 @@ fun RequestCard(app: DjTrotApp, suggestion: SongRequest, drive: DriveContext, dr
     val connection by app.account.connection.collectAsStateWithLifecycle()
     val tokens by app.orders.tokens.collectAsStateWithLifecycle()
     val order by app.orders.current.collectAsStateWithLifecycle()
+    val hearing by app.mic.state.collectAsStateWithLifecycle()
+    val dj by app.dj.collectAsStateWithLifecycle()
     val context = LocalContext.current
+    // 화면을 떠나면 그만 듣는다. 그때까지 들은 말은 사연으로 남는다.
+    DisposableEffect(Unit) { onDispose { app.mic.stop() } }
     val connected = connection is Connection.Connected
     val parked = !driving && !drive.noSetup
     val request = order?.request ?: suggestion
@@ -116,13 +122,34 @@ fun RequestCard(app: DjTrotApp, suggestion: SongRequest, drive: DriveContext, dr
             Tag(request.styleLabel)
         }
         Spacer(Modifier.height(18.dp))
-        if (driving) {
-            Text("정차하면 사연을 보여 드릴게요", style = body(DjType.BodyM, DjColors.Muted))
-        } else {
-            Text("“${request.story}”", style = headline(DjType.TitleS, DjColors.Ink, FontWeight.Bold), maxLines = 2, overflow = TextOverflow.Ellipsis)
+        val current = order
+        when {
+            hearing.listening && (driving || hearing.heard.isBlank()) -> Text("듣고 있어요. 사연을 말씀해 주세요", style = body(DjType.BodyM, DjColors.Gold2))
+            hearing.listening -> Text("“${hearing.heard}”", style = headline(DjType.TitleS, DjColors.Gold2, FontWeight.Bold), maxLines = 2, overflow = TextOverflow.Ellipsis)
+            driving -> Text("정차하면 사연을 보여 드릴게요", style = body(DjType.BodyM, DjColors.Muted))
+            else -> Text("“${request.story}”", style = headline(DjType.TitleS, DjColors.Ink, FontWeight.Bold), maxLines = 2, overflow = TextOverflow.Ellipsis)
+        }
+        // 🔑 말로 넣는 사연(Pleos SpeechToText) — 주행 중에도 손 대신 말로 넣을 수 있다. 맡긴 뒤에는 사연을 바꾸지 않는다.
+        if (current == null) {
+            Spacer(Modifier.height(18.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Pill(
+                    icon = DjIcons.Mic,
+                    text = when {
+                        hearing.listening -> "다 말했어요"
+                        dj.freshSpoken() != null -> "사연 다시 말하기"
+                        else -> "말로 사연 넣기"
+                    },
+                    active = hearing.listening,
+                    onClick = { if (hearing.listening) app.mic.stop() else app.mic.listen() },
+                )
+                hearing.problem?.let { problem ->
+                    Spacer(Modifier.width(16.dp))
+                    Text(problem, style = body(DjType.LabelS, DjColors.Muted), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+            }
         }
         Spacer(Modifier.height(24.dp))
-        val current = order
         when {
             current != null && current.working -> OrderProgress(current)
             current != null && current.state == "ready" -> {
@@ -148,7 +175,10 @@ fun RequestCard(app: DjTrotApp, suggestion: SongRequest, drive: DriveContext, dr
                 },
                 enabled = parked && tokens != 0,
                 gold = true,
-            ) { app.orders.create(request, drive.toInput(LocalTime.now())) }
+            ) {
+                app.orders.create(request, drive.toInput(LocalTime.now(), app.spoken))
+                app.dj.update { it.forget() }
+            }
         }
     }
 }

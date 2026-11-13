@@ -1,7 +1,11 @@
 package ai.reopt.djtrot.dj
 
 import ai.reopt.djtrot.car.Arrival
+import ai.reopt.djtrot.car.Departure
 import ai.reopt.djtrot.car.DriveContext
+import ai.reopt.djtrot.car.PlaceKind
+import ai.reopt.djtrot.car.RoadAhead
+import ai.reopt.djtrot.car.Traffic
 import java.time.Duration
 import java.time.Instant
 import java.time.LocalTime
@@ -43,20 +47,79 @@ object DjScript {
         }
     }
 
-    /** 오프라인 멘트 — 서버 DJ 브리프를 받지 못했을 때. */
+    /**
+     * 오프라인 멘트 — 서버 DJ 브리프를 받지 못했을 때.
+     * 🔑 지금 길에서 할 말([remarks])이 여럿이면 앞의 두 가지를 곡마다 번갈아 쓴다 — 막히는 길에서 매 곡 "막히네요"만 하지 않게.
+     * 🔴 어린이보호구역에서는 곡 이름만 말한다.
+     */
     fun intro(song: SongInfo, drive: DriveContext, now: LocalTime, seed: Int): String {
         val play = play(song, seed)
+        if (drive.schoolZone) return play
         val destination = drive.destination
         val minutes = destination?.remainMinutes
-        val region = drive.region
+        if (destination != null && minutes != null && minutes <= 3) return "${destination.name}, 거의 다 오셨네요. $play"
+        val remarks = remarks(drive, now)
+        if (remarks.isEmpty()) return "${timeOfDay(now).greeting}. $play"
+        return "${remarks[Math.floorMod(seed, minOf(remarks.size, 2))]} $play"
+    }
+
+    /** 지금 길에서 DJ가 꺼낼 만한 말 — 급한 것부터. 곡 소개 앞에 그대로 붙는다. */
+    fun remarks(drive: DriveContext, now: LocalTime): List<String> {
         val time = timeOfDay(now)
+        val destination = drive.destination
+        val minutes = destination?.remainMinutes
+        return listOfNotNull(
+            when (drive.ahead) {
+                RoadAhead.REST_AREA -> "곧 휴게소네요. 잠깐 쉬어 가셔도 좋겠어요."
+                RoadAhead.TUNNEL -> "곧 터널입니다. 터널 안에서도 노래는 이어집니다."
+                RoadAhead.TOLL -> "곧 톨게이트를 지납니다."
+                null -> null
+            },
+            drive.traffic?.let(::jam),
+            drive.tripMinutes?.takeIf { drive.longDrive }?.let { "벌써 ${duration(it)}째 달리고 계시네요. 잠깐 쉬어 가셔도 좋겠어요." },
+            when {
+                drive.fog -> "안개 낀 ${time.road}이네요. 천천히 가시죠."
+                drive.raining -> "비 오는 ${time.road}이네요."
+                else -> null
+            },
+            if (destination != null && minutes != null) toward(destination.name, destination.kind, "${minutes}분 남았네요.") else null,
+            if (drive.charging) "충전하는 동안 한 곡 들으시죠." else null,
+            if (drive.company) "함께 타신 분과 같이 들으시죠." else null,
+            if (drive.cruising) "크루즈 켜고 편안히 가는 길이네요." else null,
+            drive.region?.let { "$it 지나시는 ${time.road}에" },
+            if (drive.freeDrive && destination == null && !drive.stopped) "발길 닿는 대로 달리는 ${time.road}이네요." else null,
+        )
+    }
+
+    /** 목적지를 부르며 시작하는 말 — 즐겨찾기의 집·회사는 이름 대신 "집으로 가는 길". */
+    private fun toward(name: String, kind: PlaceKind?, rest: String): String = when (kind) {
+        PlaceKind.HOME -> "집으로 가는 길, $rest"
+        PlaceKind.OFFICE -> "회사 가는 길, $rest"
+        null -> "${name}까지 $rest"
+    }
+
+    private fun jam(traffic: Traffic): String {
+        val where = traffic.road?.let { "$it 쪽이" } ?: "가는 길이"
         return when {
-            destination != null && minutes != null && minutes <= 3 -> "${destination.name}, 거의 다 오셨네요. $play"
-            destination != null && minutes != null -> "${destination.name}까지 ${minutes}분 남았네요. $play"
-            region != null -> "$region 지나시는 ${time.road}에 $play"
-            else -> "${time.greeting}. $play"
+            traffic.accident -> "가는 길에 사고 소식이 있네요. 천천히 가시죠."
+            traffic.roadwork -> "$where 공사로 ${traffic.jamMinutes}분쯤 막히네요. 느긋하게 가시죠."
+            else -> "$where ${traffic.jamMinutes}분쯤 막히네요. 느긋하게 가시죠."
         }
     }
+
+    /** 길 안내를 시작할 때 이번 길을 여는 한 문장. 노래는 끊지 않는다. */
+    fun departure(departure: Departure): String {
+        val minutes = departure.minutes?.takeIf { it > 0 }
+        return when {
+            minutes == null && departure.kind == null -> "${Josa.ro(departure.name)} 출발합니다. 편안히 모실게요."
+            minutes == null -> toward(departure.name, departure.kind, "출발합니다. 편안히 모실게요.")
+            minutes < SHORT_TRIP_MINUTES -> toward(departure.name, departure.kind, "${duration(minutes)}이면 닿습니다. 한 곡 들으며 가시죠.")
+            else -> toward(departure.name, departure.kind, "${duration(minutes)} 길입니다. 편안히 모실게요.")
+        }
+    }
+
+    /** 경유지에 닿았을 때. */
+    fun waypoint(arrival: Arrival): String = "${arrival.name}에 들렀습니다. 남은 길도 함께할게요."
 
     /** 목적지에 닿았을 때 이번 길을 마무리하는 한 문장. 노래는 끊지 않는다. 가까운 길에는 수고했다고 하지 않는다. */
     fun arrival(arrival: Arrival): String {

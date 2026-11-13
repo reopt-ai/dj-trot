@@ -2,6 +2,7 @@ package ai.reopt.djtrot.dj
 
 import ai.reopt.djtrot.car.Destination
 import ai.reopt.djtrot.car.DriveContext
+import ai.reopt.djtrot.car.PlaceKind
 import java.time.LocalTime
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -35,6 +36,17 @@ class StoryBuilderTest {
         assertEquals("ppongjjak", StoryBuilder.style(DriveContext(drivingMode = "SPORT"), afternoon))
         assertEquals("ballad", StoryBuilder.style(DriveContext(), LocalTime.of(23, 30)))
         assertEquals("classic", StoryBuilder.style(DriveContext(drivingMode = "ECO"), afternoon))
+    }
+
+    @Test fun `비 오는 길은 발라드와 사연에 담는다`() {
+        val request = StoryBuilder.build(DriveContext(destination = Destination("부산역"), raining = true), afternoon)
+        assertEquals("ballad", request.style)
+        assertTrue(request.story.startsWith("부산역으로 가는 비 오는 오후 길."))
+    }
+
+    @Test fun `즐겨찾기의 집과 회사가 주제를 정한다`() {
+        assertEquals("hometown", StoryBuilder.build(DriveContext(destination = Destination("래미안 101동", kind = PlaceKind.HOME)), afternoon).topic)
+        assertEquals("cheer", StoryBuilder.build(DriveContext(destination = Destination("판교 사옥", kind = PlaceKind.OFFICE)), afternoon).topic)
     }
 
     @Test fun `사연은 200자를 넘지 않는다`() {

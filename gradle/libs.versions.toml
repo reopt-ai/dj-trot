@@ -15,6 +15,7 @@ junit = "4.13.2"
 pleosVehicle = "2.3.2"
 pleosNaviHelper = "3.0.5"
 pleosTts = "3.3.1"
+pleosStt = "3.3.1"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -37,6 +38,7 @@ junit = { group = "junit", name = "junit", version.ref = "junit" }
 pleos-vehicle = { group = "ai.pleos.playground", name = "Vehicle", version.ref = "pleosVehicle" }
 pleos-navihelper = { group = "ai.pleos.playground", name = "NaviHelper", version.ref = "pleosNaviHelper" }
 pleos-tts = { group = "ai.pleos.playground", name = "TextToSpeech", version.ref = "pleosTts" }
+pleos-stt = { group = "ai.pleos.playground", name = "SpeechToText", version.ref = "pleosStt" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
