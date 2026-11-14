@@ -73,6 +73,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.IntOffset
@@ -240,16 +241,21 @@ private fun DjContent(app: DjTrotApp, player: Player?, compact: Boolean) {
 
 // ── 아래 탭 ──────────────────────────────────────────
 
-/** 앱 표식과 이름 — 넓은 창의 탭 왼쪽. */
+/** 앱 표식과 이름 — 넓은 창의 탭 왼쪽. 이름은 금빛 새틴 글자로 크게 쓴다(무대 간판처럼). */
 @Composable
 private fun Brand() {
     Row(verticalAlignment = Alignment.CenterVertically) {
-        AppMark(72.dp)
+        AppMark(80.dp)
         Spacer(Modifier.width(16.dp))
-        Column {
-            Text("DJ 트롯", style = headline(DjType.TitleS, DjColors.Gold2))
-            Text("마스터트롯 AI 트로트 라디오", style = body(DjType.LabelS, DjColors.Muted, FontWeight.Medium))
-        }
+        Text(
+            "DJ 트롯",
+            style = headline(DjType.HeadlineS, DjColors.Gold2, FontWeight.Black).copy(
+                brush = Brush.verticalGradient(listOf(DjColors.Gold2, DjColors.SatinEdge, DjColors.Gold, DjColors.GoldDeep)),
+                shadow = Shadow(color = DjColors.Gold.copy(alpha = 0.45f), offset = Offset(0f, 2f), blurRadius = 18f),
+            ),
+            maxLines = 1,
+            softWrap = false,
+        )
     }
 }
 
