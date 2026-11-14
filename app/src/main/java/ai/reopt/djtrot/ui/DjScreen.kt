@@ -119,7 +119,7 @@ private enum class Section(val label: String, val icon: ImageVector) {
     PLAY("재생", DjIcons.Disc),
     DJ("DJ", DjIcons.Mic),
     SONGS("노래", DjIcons.Queue),
-    REQUEST("신청곡", DjIcons.Sparkle),
+    REQUEST("생성곡", DjIcons.Sparkle),
 }
 
 /** 무대(재생·DJ 칸)가 그리는 것과 할 수 있는 일. */
@@ -481,7 +481,7 @@ private fun PlayView(m: StageModel, modifier: Modifier) {
                     // 신청해 만든 노래가 다음 차례면 금빛으로 미리 알린다.
                     Icon(DjIcons.Sparkle, contentDescription = null, tint = DjColors.Gold, modifier = Modifier.size(26.dp))
                     Spacer(Modifier.width(8.dp))
-                    Text("다음은 신청곡", style = body(DjType.LabelM, DjColors.Gold, FontWeight.Bold))
+                    Text("다음은 생성곡", style = body(DjType.LabelM, DjColors.Gold, FontWeight.Bold))
                     Spacer(Modifier.width(16.dp))
                     Text("‘$next’", style = body(DjType.BodyS, DjColors.Gold2, FontWeight.SemiBold), maxLines = 1, overflow = TextOverflow.Ellipsis)
                 } else {
@@ -635,7 +635,7 @@ private fun MadeTag() {
     ) {
         Icon(DjIcons.Sparkle, contentDescription = null, tint = DjColors.OnGold, modifier = Modifier.size(20.dp))
         Spacer(Modifier.width(6.dp))
-        Text("신청곡", style = body(DjType.LabelS, DjColors.OnGold, FontWeight.Bold))
+        Text("생성곡", style = body(DjType.LabelS, DjColors.OnGold, FontWeight.Bold))
     }
 }
 

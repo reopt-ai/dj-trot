@@ -115,7 +115,7 @@ fun RequestCard(app: DjTrotApp, suggestion: SongRequest, drive: DriveContext, dr
         Row(verticalAlignment = Alignment.CenterVertically) {
             Icon(DjIcons.Sparkle, contentDescription = null, tint = DjColors.Gold, modifier = Modifier.size(30.dp))
             Spacer(Modifier.width(12.dp))
-            Text("이 길의 신청곡", style = body(DjType.BodyS, DjColors.Gold, FontWeight.Bold))
+            Text("이 길의 생성곡", style = body(DjType.BodyS, DjColors.Gold, FontWeight.Bold))
             Spacer(Modifier.weight(1f))
             Tag(request.topicLabel)
             Spacer(Modifier.width(10.dp))
@@ -312,7 +312,7 @@ fun SongShelf(app: DjTrotApp, shelf: ShelfMemory, ui: PlayerUi, player: Player?,
                 ShelfState.Failed -> ErrorNotice("노래 목록을 받지 못했어요.", action = "다시 받기", onAction = { retry++ })
                 is ShelfState.Ready -> when {
                     tab == Shelf.MINE && !connected -> EmptyShelf("휴대폰을 연결하면 길에서 만든 노래가 여기 모여요")
-                    state.items.isEmpty() && tab == Shelf.MINE -> EmptyShelf("아직 만든 노래가 없어요. 이 길의 신청곡을 만들어 보세요")
+                    state.items.isEmpty() && tab == Shelf.MINE -> EmptyShelf("아직 만든 노래가 없어요. 이 길의 생성곡을 만들어 보세요")
                     state.items.isEmpty() -> EmptyShelf("노래 목록을 준비하고 있어요. 곧 무대에 올라와요")
                     tab == Shelf.STYLES -> StyleGrid(state.items) { id -> player?.let { playList(it, id) } }
                     else -> SongList(state.items, ui) { index -> playFrom(player, ui, state.items, index) }
@@ -571,7 +571,7 @@ fun DrivingCard(ui: PlayerUi, modifier: Modifier) {
                     Icon(DjIcons.Sparkle, contentDescription = null, tint = DjColors.Gold, modifier = Modifier.size(26.dp))
                     Spacer(Modifier.width(8.dp))
                 }
-                Text(if (ui.nextMade) "다음은 신청곡" else "다음 곡", style = body(DjType.LabelM, DjColors.Gold, FontWeight.Bold))
+                Text(if (ui.nextMade) "다음은 생성곡" else "다음 곡", style = body(DjType.LabelM, DjColors.Gold, FontWeight.Bold))
             }
             Spacer(Modifier.height(16.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
