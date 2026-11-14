@@ -6,6 +6,7 @@
   `trot-song/1` 모양으로 바꿔 준다. 빼고 싶은 활동명은 --skip-artist로 준다.
 - 그 곡들의 음원은 --audio-dir 의 MP3 중 하나를 곡 ID로 골라 내준다(Range 지원).
 - 나머지(/config, /dj/brief, /pairings, /devices, /benefits, /songs …)는 DJ 트롯 서버(--upstream)로 그대로 전달한다.
+- --real-audio 를 주면 무대의 실제 음원을 처음 들을 때 한 번 받아 --audio-dir/real 에 두고 내준다(받지 못하면 위의 흉내 음원).
 - --fake-songs 초를 주면 노래 만들기(POST /songs)를 서버로 보내지 않는다. 그 초 동안 만드는 중으로 답하다가, 이 계정이
   이미 만든 노래 하나를 완성곡으로 돌려준다. 토큰을 쓰지 않고 주문·대기·완성 화면을 시험할 때 쓴다.
 
@@ -126,7 +127,8 @@ def passed(headers):
     return {name: headers[name] for name in ("Content-Range", "Accept-Ranges") if headers.get(name)}
 
 
-def make_handler(upstream, files, catalog, fake_seconds):
+def make_handler(upstream, files, catalog, fake_seconds, real_audio=None):
+    real_lock = threading.Lock()
     # 가짜 주문 — id → (맡긴 때, 사연)
     orders = {}
 
@@ -237,8 +239,33 @@ def make_handler(upstream, files, catalog, fake_seconds):
         def json(self, value, head=False, status=200):
             return self.reply(status, json.dumps(value, ensure_ascii=False).encode(), "application/json; charset=utf-8", head)
 
+        def real(self, song_id):
+            """--real-audio: 무대의 실제 음원을 처음 들을 때 한 번 받아 폴더에 둔다. 받지 못하면 None(흉내 음원으로 답한다)."""
+            if not real_audio:
+                return None
+            folder, stage = real_audio
+            name = os.path.join(folder, song_id + ".mp3")
+            if os.path.exists(name):
+                return name
+            with real_lock:
+                if os.path.exists(name):
+                    return name
+                part = name + ".part"
+                try:
+                    with urllib.request.urlopen(f"{stage}/stage/songs/{song_id}/audio", timeout=60) as response, open(part, "wb") as out:
+                        while chunk := response.read(1 << 16):
+                            out.write(chunk)
+                    os.replace(part, name)
+                    sys.stderr.write(f"real audio {song_id}: {os.path.getsize(name)} bytes\n")
+                    return name
+                except (urllib.error.URLError, OSError) as error:
+                    sys.stderr.write(f"real audio {song_id} 실패: {error}\n")
+                    if os.path.exists(part):
+                        os.remove(part)
+                    return None
+
         def audio(self, song_id, head):
-            name = files[int(hashlib.sha256(song_id.encode()).hexdigest(), 16) % len(files)]
+            name = self.real(song_id) or files[int(hashlib.sha256(song_id.encode()).hexdigest(), 16) % len(files)]
             size = os.path.getsize(name)
             start, end, status = 0, size - 1, 200
             ranged = re.match(r"bytes=(\d*)-(\d*)", self.headers.get("Range", ""))
@@ -291,11 +318,16 @@ def main():
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8790)
     parser.add_argument("--fake-songs", type=int, default=0, metavar="SECONDS", help="노래 만들기를 서버로 보내지 않고 이 초 뒤 완성으로 답한다(0이면 끔)")
+    parser.add_argument("--real-audio", action="store_true", help="무대의 실제 음원을 처음 들을 때 받아 --audio-dir/real 에 두고 내준다(받지 못하면 흉내 음원)")
     args = parser.parse_args()
     files = sorted(os.path.join(args.audio_dir, f) for f in os.listdir(args.audio_dir) if f.endswith(".mp3"))
     if not files:
         sys.exit("MP3 파일이 없어요: " + args.audio_dir)
-    server = ThreadingHTTPServer((args.host, args.port), make_handler(args.upstream.rstrip("/"), files, Catalog(args.upstream.rstrip("/"), args.stage.rstrip("/"), set(args.skip_artist)), args.fake_songs))
+    real_audio = None
+    if args.real_audio:
+        os.makedirs(os.path.join(args.audio_dir, "real"), exist_ok=True)
+        real_audio = (os.path.join(args.audio_dir, "real"), args.stage.rstrip("/"))
+    server = ThreadingHTTPServer((args.host, args.port), make_handler(args.upstream.rstrip("/"), files, Catalog(args.upstream.rstrip("/"), args.stage.rstrip("/"), set(args.skip_artist)), args.fake_songs, real_audio))
     print(f"DJ 트롯 목 서버 http://{args.host}:{args.port}{PREFIX} → 제공 목록·음원은 흉내, 나머지는 {args.upstream}", flush=True)
     if args.fake_songs:
         print(f"노래 만들기는 흉내: 서버로 보내지 않고 {args.fake_songs}초 뒤 이미 만든 노래로 완성", flush=True)
