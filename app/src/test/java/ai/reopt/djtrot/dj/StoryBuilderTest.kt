@@ -16,7 +16,7 @@ class StoryBuilderTest {
         val request = StoryBuilder.build(drive, afternoon)
         assertEquals("성남에서 부산역으로 가는 오후 길. 도착까지 250분.", request.story)
         assertEquals("life", request.topic)
-        assertEquals("dance", request.style)
+        assertEquals("classic", request.style)
     }
 
     @Test fun `목적지 이름으로 주제를 고른다`() {

@@ -87,7 +87,7 @@ data class Choices(
 )
 
 @Serializable
-data class ChoiceDefaults(val topic: String = "life", val style: String = "dance", val voice: String = "female")
+data class ChoiceDefaults(val topic: String = "life", val style: String = "classic", val voice: String = "female")
 
 @Serializable
 data class TokenPolicy(val welcome: Int = 0, val dailyLimit: Int = 0)
@@ -253,7 +253,7 @@ object Labels {
                 Choice("life", "인생"), Choice("friends", "친구"), Choice("cheer", "힘내라 응원가"), Choice("health", "건강 장수"),
             ),
             style = listOf(
-                Choice("ppongjjak", "신나는 뽕짝"), Choice("classic", "정통 트로트"), Choice("dance", "세미 트로트"), Choice("ballad", "트로트 발라드"),
+                Choice("ppongjjak", "신나는 뽕짝"), Choice("classic", "정통 트로트"), Choice("ballad", "트로트 발라드"),
             ),
             voice = listOf(Choice("male", "남자 목소리"), Choice("female", "여자 목소리")),
         ),

@@ -55,8 +55,8 @@ object StoryBuilder {
         drive.drivingMode == "SPORT" -> "ppongjjak"
         drive.raining || drive.fog -> "ballad"
         DjScript.timeOfDay(now) in setOf(DjScript.TimeOfDay.NIGHT, DjScript.TimeOfDay.DAWN) -> "ballad"
-        drive.drivingMode == "ECO" -> "classic"
-        else -> "dance"
+        // 🔑 세미 트로트(dance)는 만들지 않는다 — 서버 선택지에서 뺐다. 그 밖에는 정통 트로트.
+        else -> "classic"
     }
 
     fun story(drive: DriveContext, now: LocalTime, spoken: String?): String {
