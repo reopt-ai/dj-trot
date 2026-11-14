@@ -118,3 +118,4 @@ DJ 목소리는 화면과 따로 미룹니다. 내비가 300m 안의 회전, 주
 | 서버 계약, 주행 판단, 멘트·사연, 가사 시각, 표지 고르기 | JVM 단위 테스트(`app/src/test`) |
 | 재생 서비스, Pleos SDK, 창 크기, 주행 중 화면 | Pleos Connect Emulator에서 확인 |
 | 서버 쪽 동작(노래 만들기 흐름) | 목 서버 `tools/mock_djtrot.py --fake-songs` |
+| 에뮬레이터가 주지 않는 차량·내비 신호, 말로 넣는 사연 | `tools/trigger.py`로 디버그 빌드에 덧씌워 확인 |

@@ -16,6 +16,7 @@ JDK 17이 필요합니다(`JAVA_HOME`). 모듈은 `:app` 하나입니다. 빌드
 ./gradlew :app:installDebug -Pdjtrot.api=http://10.0.2.2:8790/api/v1/dj-trot  # 에뮬레이터에 설치(목 서버를 볼 때)
 adb shell am start -n ai.reopt.djtrot/.ui.MainActivity
 uv run --no-project tools/mock_djtrot.py --audio-dir <mp3 폴더> --upstream <DJ 트롯 서버> --fake-songs 45
+uv run --no-project tools/trigger.py set gear=DRIVE rain=on jam=12 --next     # 에뮬레이터에 없는 차량 신호를 덧씌워 DJ 멘트 시험(keys, scenario, say)
 ```
 
 - `-q`로 돌리면 성공 시 아무것도 찍히지 않습니다. 결과는 `app/build/test-results/testDebugUnitTest/*.xml`에서 확인합니다.
@@ -52,6 +53,6 @@ uv run --no-project tools/mock_djtrot.py --audio-dir <mp3 폴더> --upstream <DJ
 
 **서버 계약은 `api/`에 있습니다.** `DjTrotApi`(OkHttp, 코루틴)와 `Models.kt`의 직렬화 모델입니다. 노래는 출처와 상관없이 `trot-song/1` 한 모양입니다. 읽을 때는 `ignoreUnknownKeys`로 받지만, **보낼 때는 서버가 모르는 키를 400으로 거절합니다.** 그래서 `explicitNulls=false`로 null 키를 빼고, 요청 모델에 필드를 더하려면 서버 계약이 먼저 바뀌어야 합니다. `ContractTest`가 이 모양을 지킵니다.
 
-**차량 신호는 `car/`에 있습니다.** `CarSignals`가 Pleos Vehicle, NaviHelper와 `AaosCar`(GEAR_SELECTION, EV_CHARGE_PORT_OPEN, CarUxRestrictions)를 하나의 `StateFlow<DriveContext>`로 모읍니다. Pleos Vehicle이 폐기 예정으로 표시한 API는 쓰지 않고 AAOS 표준 속성으로 읽습니다(`CI=true`에서 컴파일 경고가 실패입니다). SDK마다 따로 실패할 수 있으니 하나가 안 되면 그 값만 비웁니다. `DriveContext`는 안드로이드에 의존하지 않는 순수 모델이라 JVM 테스트로 검사합니다. 위치는 내비 주소만 받고 좌표는 받지 않습니다. 서버로 갈 때는 `dj/DriveInputs.kt`의 `toInput()`으로만 바뀌고, 식별 정보는 이 단계에서 빠집니다. 정체·비·동승자 같은 값은 서버 계약에 자리가 없어 기기 멘트에만 쓰고, 즐겨찾기(집·회사)와 동승자 유무는 계약이 바뀌어도 보내지 않습니다. 내비 안내 직전과 방향지시등이 켜진 동안은 `DriveContext.holdTalk`가 참이고, 서비스의 `talk()`가 풀릴 때까지 목소리를 미룹니다.
+**차량 신호는 `car/`에 있습니다.** `CarSignals`가 Pleos Vehicle, NaviHelper와 `AaosCar`(GEAR_SELECTION, EV_CHARGE_PORT_OPEN, CarUxRestrictions)를 하나의 `StateFlow<DriveContext>`로 모읍니다. Pleos Vehicle이 폐기 예정으로 표시한 API는 쓰지 않고 AAOS 표준 속성으로 읽습니다(`CI=true`에서 컴파일 경고가 실패입니다). SDK마다 따로 실패할 수 있으니 하나가 안 되면 그 값만 비웁니다. `DriveContext`는 안드로이드에 의존하지 않는 순수 모델이라 JVM 테스트로 검사합니다. 위치는 내비 주소만 받고 좌표는 받지 않습니다. 서버로 갈 때는 `dj/DriveInputs.kt`의 `toInput()`으로만 바뀌고, 식별 정보는 이 단계에서 빠집니다. 정체·비·동승자 같은 값은 서버 계약에 자리가 없어 기기 멘트에만 쓰고, 즐겨찾기(집·회사)와 동승자 유무는 계약이 바뀌어도 보내지 않습니다. 디버그 빌드의 `debug/TriggerReceiver`(`app/src/debug`)는 `tools/trigger.py`가 보낸 값을 `CarSignals.stage()`로 실제 값 위에 덧씌웁니다. 키와 풀이는 `debug/Staging.kt`에 한 번만 적고, `DriveContext`에 멘트용 값을 더하면 여기에도 키를 더합니다. 내비 안내 직전과 방향지시등이 켜진 동안은 `DriveContext.holdTalk`가 참이고, 서비스의 `talk()`가 풀릴 때까지 목소리를 미룹니다.
 
 **화면은 Compose 단일 화면입니다.** `ui/DjScreen`이 창 크기로 넓은 창(두 칸, 기준 1682×1210dp)과 좁은 창(한 칸, 기준 840dp 폭)을 고르고, 기준 크기에 맞춰 `LocalDensity`를 비례 조정합니다. 주행 중 여부(`!drive.stopped || drive.restricted`)는 `LocalCalm`(`ui/Parts.kt`)으로 내려가고, 목록, 사연 본문, 가사, 애니메이션이 이 값을 보고 스스로 숨거나 멈춥니다. 새 화면 요소도 `LocalCalm`과 `DriveContext.brief()`·`noSetup`을 따라야 합니다. 색과 글자 크기는 `ui/Theme.kt`의 `DjColors`와 `DjType`(Pleos 단계)만 쓰고, 글자 대비는 4.5:1 이상입니다. 휴대폰 연결 화면 `ConnectActivity`는 `distractionOptimized`가 아니라서 주행 중에는 시스템이 막습니다.
