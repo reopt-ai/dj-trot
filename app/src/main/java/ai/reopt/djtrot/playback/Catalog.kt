@@ -1,6 +1,6 @@
 package ai.reopt.djtrot.playback
 
-import ai.reopt.djtrot.account.DeviceAccount
+import ai.reopt.djtrot.account.SongAccess
 import ai.reopt.djtrot.api.CatalogResponse
 import ai.reopt.djtrot.api.DjTrotApi
 import ai.reopt.djtrot.api.LyricLine
@@ -23,7 +23,7 @@ import kotlinx.coroutines.sync.withLock
  * 🔑 앱 화면은 고른 곡과 그 목록을 통째로 큐로 보낸다. 미디어 센터처럼 곡 하나만 보내는 쪽은 그 곡을 마지막으로 본 목록을 이어 튼다(`queueFor`).
  * 🔑 선반 응답 하나에 모든 곡과 가사 시각이 들어 있다 — 1분 동안 다시 받지 않는다.
  */
-class Catalog(private val api: DjTrotApi, private val account: DeviceAccount) {
+class Catalog(private val api: DjTrotApi, private val access: () -> SongAccess) {
     private val songs = ConcurrentHashMap<String, TrotSong>()
     private val lists = ConcurrentHashMap<String, List<String>>()
     /** 곡 ID → 그 곡을 마지막으로 보여 준 목록 ID. 곡 하나만 받은 재생 요청을 목록으로 늘릴 때 쓴다. */
@@ -46,7 +46,7 @@ class Catalog(private val api: DjTrotApi, private val account: DeviceAccount) {
     suspend fun children(parentId: String): List<MediaItem> = MediaPath.parse(parentId)?.let { children(it) }.orEmpty()
 
     private suspend fun children(path: MediaPath): List<MediaItem> = when (path) {
-        MediaPath.Root -> Shelf.entries.filter { it != Shelf.MINE || account.connected }.map(::folder)
+        MediaPath.Root -> Shelf.entries.filter { it != Shelf.MINE || access().canList }.map(::folder)
         is MediaPath.Top -> when (path.shelf) {
             Shelf.STYLES -> styles()
             Shelf.MINE -> remember(path.id, mine())
@@ -118,7 +118,7 @@ class Catalog(private val api: DjTrotApi, private val account: DeviceAccount) {
     }
 
     private suspend fun mine(): List<TrotSong> = runCatching {
-        account.authorized { token -> api.songs(token) }.songs.mapNotNull { it.song }
+        access().read { auth -> api.songs(auth) }.songs.mapNotNull { it.song }
     }.getOrDefault(emptyList())
 
     private fun remember(listId: String, found: List<TrotSong>): List<MediaItem> {
@@ -127,8 +127,15 @@ class Catalog(private val api: DjTrotApi, private val account: DeviceAccount) {
         return found.map(::keep)
     }
 
-    /** 광고 음악을 재생 항목으로 — 목록(선반·내 노래)에는 넣지 않는다. */
-    fun ad(song: TrotSong): MediaItem = keep(song)
+    /**
+     * 광고 음악을 재생 항목으로 — 목록(선반·내 노래)에는 넣지 않는다.
+     * 🔑 [maxSeconds]가 0보다 크면 앞에서부터 그만큼만 튼다. 그 길이가 끝나면 다음 곡으로 저절로 넘어간다(끝까지 들은 것).
+     */
+    fun ad(song: TrotSong, maxSeconds: Int = 0): MediaItem {
+        val item = keep(song)
+        if (maxSeconds <= 0) return item
+        return item.buildUpon().setClippingConfiguration(MediaItem.ClippingConfiguration.Builder().setEndPositionMs(maxSeconds * 1000L).build()).build()
+    }
 
     private fun keep(song: TrotSong): MediaItem {
         songs[song.id] = song

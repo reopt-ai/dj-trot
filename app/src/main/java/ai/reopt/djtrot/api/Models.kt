@@ -90,6 +90,9 @@ data class Choices(
 data class ChoiceDefaults(val topic: String = "life", val style: String = "classic", val voice: String = "female")
 
 @Serializable
+data class CreationPolicy(val open: Boolean = true, val guest: Boolean = false)
+
+@Serializable
 data class TokenPolicy(val welcome: Int = 0, val dailyLimit: Int = 0)
 
 @Serializable
@@ -97,6 +100,8 @@ data class DjConfig(
     val choices: Choices = Choices(),
     val defaults: ChoiceDefaults = ChoiceDefaults(),
     val tokens: TokenPolicy = TokenPolicy(),
+    /** 노래 만들기가 열려 있는가. 예전 서버는 주지 않는다 — 그때는 열림으로 본다. */
+    val creation: CreationPolicy = CreationPolicy(),
     /** 고를 수 있는 DJ. 예전 서버는 주지 않는다 — 그때는 기본 DJ만 쓴다. */
     val djs: List<DjInfo> = emptyList(),
 )
@@ -246,9 +251,15 @@ data class DriveSong(
     val errorCode: String? = null,
     val brief: SongBrief = SongBrief(),
     val song: TrotSong? = null,
+    /** 제작 중계 — 만드는 동안의 단계와 제목·가사 몇 줄. 예전 서버는 주지 않는다. */
+    val progress: SongProgress? = null,
     val createdAt: String = "",
     val updatedAt: String = "",
 )
+
+/** 만드는 중인 노래의 진행 — [phase]는 lyrics(작사) · compose(작곡) · finish(마무리). 작사가 끝나면 [title]과 [lines]가 채워진다. */
+@Serializable
+data class SongProgress(val phase: String = "lyrics", val title: String? = null, val lines: List<String> = emptyList())
 
 @Serializable
 data class DriveSongPage(val songs: List<DriveSong> = emptyList(), val nextCursor: String? = null)
@@ -308,7 +319,22 @@ data class AdConditions(
 
 /** 광고 한 편 — 광고 음악([song])과 틀 조건. */
 @Serializable
-data class Ad(val id: String, val title: String, val song: TrotSong, val conditions: AdConditions = AdConditions())
+data class Ad(
+    val id: String,
+    val title: String,
+    val song: TrotSong,
+    /** 광고 음악을 앞에서부터 이만큼만 튼다(초). 0이면 곡 끝까지. 이 길이를 다 들으면 끝까지 들은 것이다. */
+    val maxSeconds: Int = 40,
+    val conditions: AdConditions = AdConditions(),
+)
+
+/** 재생 알림의 답. */
+@Serializable
+data class AdPlayedOk(val ok: Boolean = true)
+
+/** 재생 알림(통계용) — started(나오기 시작) · completed(끝까지 나옴). 생성권과는 무관하다. */
+@Serializable
+data class AdPlayed(val event: String)
 
 @Serializable
 data class AdReward(val listens: Int = 3, val tokens: Int = 1, val maxBalance: Int = 2)
@@ -322,8 +348,23 @@ data class AdHeard(val playKey: String)
 
 /** 광고 진행 — 다음 생성권까지 들은 횟수. [capped]면 생성권이 가득 차 기다리는 중이다. */
 @Serializable
-data class AdProgress(val progress: Int = 0, val needed: Int = 3, val granted: Boolean = false, val capped: Boolean = false, val balance: Int = 0)
+data class AdProgress(
+    val progress: Int = 0,
+    val needed: Int = 3,
+    val granted: Boolean = false,
+    val capped: Boolean = false,
+    /** 오늘 광고로 받을 수 있는 생성권을 다 받았다. */
+    val limited: Boolean = false,
+    val balance: Int = 0,
+)
 
 /** 차가 미리 받아 두는 DJ 음성 팩. [version]이 null이면 서버가 팩을 쓰지 않는 중이다. */
 @Serializable
 data class VoicePack(val version: String? = null, val clips: List<VoiceClip> = emptyList())
+
+/** 드라이브 노래 요청의 자격 — 기기 세션([token]) 또는 시연 손님 ID([guest]). 둘 중 하나만 쓴다(세션이 먼저). */
+data class SongAuth(val token: String? = null, val guest: String? = null) {
+    companion object {
+        const val GUEST_HEADER = "X-DjTrot-Guest"
+    }
+}

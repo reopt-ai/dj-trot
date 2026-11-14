@@ -76,6 +76,11 @@ class Ads(
         }
     }
 
+    /** 재생 알림(통계용) — 실패해도 조용히 넘어간다. */
+    fun played(ad: Ad, event: String) {
+        scope.launch { runCatching { api.adPlayed(ad.id, event) } }
+    }
+
     fun adOf(songId: String?): Ad? = songId?.let { id -> list.value.firstOrNull { it.song.id == id } }
 
     /** 지금 틀 광고 — 장소가 맞고, 쉬는 시간이 지난 것 하나. [force]면 쉬는 시간을 보지 않는다(시뮬레이션). */

@@ -4,12 +4,14 @@ import ai.reopt.djtrot.BuildConfig
 import ai.reopt.djtrot.DjState
 import ai.reopt.djtrot.DjTrotApp
 import ai.reopt.djtrot.Said
+import ai.reopt.djtrot.api.Ad
 import ai.reopt.djtrot.api.DjInfo
 import ai.reopt.djtrot.api.Labels
 import ai.reopt.djtrot.api.LyricLine
 import ai.reopt.djtrot.car.DriveContext
 import ai.reopt.djtrot.dj.DemoDrive
 import ai.reopt.djtrot.dj.DemoStep
+import ai.reopt.djtrot.dj.SongRequest
 import ai.reopt.djtrot.dj.StoryBuilder
 import ai.reopt.djtrot.dj.VoicePackStore
 import ai.reopt.djtrot.playback.Shelf
@@ -85,6 +87,8 @@ import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Popup
+import androidx.compose.ui.window.PopupProperties
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
@@ -123,14 +127,18 @@ fun DjScreen(app: DjTrotApp, player: Player?) {
 }
 
 /**
- * 화면 칸. 넓은 창은 무대 열 아래에 [재생 | DJ | 설정]만, 좁은 창은 모든 칸을 아래 탭으로 오간다.
+ * 화면 칸. 넓은 창은 무대 열 아래에 [재생 | 트롯생성 | 설정]만 두고 DJ는 오른쪽 열 위에 늘 보인다. 좁은 창은 모든 칸을 아래 탭으로 오간다.
  * 🔑 탭은 화면 아래에 둔다 — 운전석에서 손이 닿기 쉬운 쪽이고, Pleos GNB와 같은 높이 흐름이다.
  */
 private enum class Section(val label: String, val icon: ImageVector) {
     PLAY("재생", DjIcons.Disc),
-    DJ("DJ", DjIcons.Mic),
+
+    /** 트롯생성 — 이 길의 사연으로 노래를 만든다(이 길의 생성곡 카드, 사연의 재료, 만든 노래). */
+    CREATE("트롯생성", DjIcons.Sparkle),
     SONGS("노래", DjIcons.Queue),
-    REQUEST("생성곡", DjIcons.Sparkle),
+
+    /** DJ — 좁은 창에서만 탭이다. 넓은 창에서는 오른쪽 열 위에 DJ가 늘 보인다([DjCard]). */
+    DJ("DJ", DjIcons.Mic),
 
     /** 설정 — 길 위의 상황을 버튼으로 흉내 내는 시연과 DJ 멘트 살펴보기(공모전·전시용, `BuildConfig.DEMO`). */
     DEMO("설정", DjIcons.Settings),
@@ -141,6 +149,14 @@ private class StageModel(
     val app: DjTrotApp,
     /** 지금 말하는 DJ의 이름 — DJ 칸의 머리에 보인다. */
     val djName: String,
+    /** 지금 DJ의 ID — 얼굴 그림을 고른다. */
+    val djId: String,
+    /** 이 길의 생성곡 제안 — 트롯생성 칸이 보여 준다. */
+    val request: SongRequest,
+    /** 지금 나오는 곡이 광고면 그 광고. */
+    val ad: Ad?,
+    /** 광고 옆에 붙는 한마디 — 생성권까지의 진행. 휴대폰을 연결하지 않았으면 null. */
+    val adNote: String?,
     val ui: PlayerUi,
     val progress: Progress,
     val dj: DjState,
@@ -167,6 +183,8 @@ private fun DjContent(app: DjTrotApp, player: Player?, compact: Boolean) {
     val demo by app.demo.collectAsStateWithLifecycle()
     val djId by app.djId.collectAsStateWithLifecycle()
     val djs by app.djs.collectAsStateWithLifecycle()
+    val ads by app.ads.list.collectAsStateWithLifecycle()
+    val adProgress by app.ads.progress.collectAsStateWithLifecycle()
     val ui = rememberPlayerUi(player)
     var now by remember { mutableStateOf(LocalTime.now()) }
     var talks by remember { mutableStateOf(app.djTalks) }
@@ -193,7 +211,13 @@ private fun DjContent(app: DjTrotApp, player: Player?, compact: Boolean) {
     // 🔑 넓은 창의 노래·신청곡은 오른쪽 열에 늘 있다. 좁은 창도 주행 중에는 무대 두 칸만 연다.
     // 시연 칸은 무대 칸이라 주행 중(시연이 덧씌운 주행 포함)에도 열려 있다.
     val available = Section.entries.filter { it != Section.DEMO || BuildConfig.DEMO }
-    val sections = if (compact && !driving) available else available.filter { it == Section.PLAY || it == Section.DJ || it == Section.DEMO }
+    // 🔑 넓은 창 — 무대 탭은 재생·트롯생성·설정. 노래 고르기와 DJ는 오른쪽 열에 늘 있다.
+    //    좁은 창 — 다섯 칸을 모두 탭으로 오가고, 주행 중에는 재생·DJ·설정만 연다(트롯생성·노래 고르기는 정차 중에).
+    val sections = when {
+        !compact -> available.filter { it == Section.PLAY || it == Section.CREATE || it == Section.DEMO }
+        driving -> available.filter { it == Section.PLAY || it == Section.DJ || it == Section.DEMO }
+        else -> available
+    }
     val shown = section.takeIf { it in sections } ?: Section.PLAY
     BackHandler(enabled = shown != Section.PLAY) { section = Section.PLAY }
     // DJ가 새로 한 말은 DJ 탭을 열 때까지 점으로 알린다.
@@ -203,6 +227,16 @@ private fun DjContent(app: DjTrotApp, player: Player?, compact: Boolean) {
     val model = StageModel(
         app = app,
         djName = djs.firstOrNull { it.id == djId }?.name ?: DjInfo.DEFAULT.name,
+        djId = djId,
+        request = request,
+        ad = ads.firstOrNull { it.song.id == ui.songId },
+        adNote = adProgress?.let { progress ->
+            when {
+                progress.limited -> "오늘 받을 생성권을 다 받았어요"
+                progress.capped -> "생성권이 가득 찼어요"
+                else -> "끝까지 들으면 ${progress.progress + 1}/${progress.needed} · 생성권까지 ${progress.needed - progress.progress}번"
+            }
+        },
         ui = ui,
         progress = progress,
         dj = dj,
@@ -236,16 +270,11 @@ private fun DjContent(app: DjTrotApp, player: Player?, compact: Boolean) {
                 Column(Modifier.fillMaxSize().padding(horizontal = 28.dp, vertical = 24.dp)) {
                     Box(Modifier.weight(1f).fillMaxWidth()) {
                         when (shown) {
-                            Section.PLAY, Section.DJ, Section.DEMO -> StagePanel(shown, model, player, Modifier.fillMaxSize())
+                            Section.PLAY, Section.CREATE, Section.DJ, Section.DEMO -> StagePanel(shown, model, player, Modifier.fillMaxSize())
                             Section.SONGS -> SongShelf(app, shelf, ui, player, Modifier.fillMaxSize())
-                            Section.REQUEST -> Column(verticalArrangement = Arrangement.spacedBy(24.dp)) {
-                                RequestCard(app, request, drive, driving, ui.songId)
-                                DriveFacts(drive)
-                                MadeSongs(app, ui, player, Modifier.weight(1f))
-                            }
                         }
                     }
-                    if (shown == Section.SONGS || shown == Section.REQUEST) {
+                    if (shown == Section.SONGS) {
                         MiniPlayer(ui, player, onOpen = { section = Section.PLAY }, Modifier.padding(top = 16.dp))
                     }
                     Spacer(Modifier.height(16.dp))
@@ -262,7 +291,7 @@ private fun DjContent(app: DjTrotApp, player: Player?, compact: Boolean) {
                             BottomTabs(sections, shown, fresh, onSelect = { section = it }, Modifier.weight(1f))
                         }
                     }
-                    RightRail(app, shelf, request, drive, driving, ui, player, Modifier.weight(1f).fillMaxHeight())
+                    RightRail(app, shelf, driving, ui, player, Modifier.weight(1f).fillMaxHeight()) { DjCard(model) }
                 }
             }
         }
@@ -382,19 +411,6 @@ private fun DriveFactPills(drive: DriveContext) {
     drive.batteryPercent?.let { BatteryPill(it) }
 }
 
-/** 좁은 창의 신청곡 칸 아래 — 사연의 재료가 된 차 정보. */
-@OptIn(ExperimentalLayoutApi::class)
-@Composable
-private fun DriveFacts(drive: DriveContext) {
-    Column(Modifier.fillMaxWidth().djCard(radius = 30.dp).padding(horizontal = 34.dp, vertical = 30.dp)) {
-        Text("이 드라이브", style = body(DjType.BodyS, DjColors.Gold, FontWeight.Bold))
-        Spacer(Modifier.height(18.dp))
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            DriveFactPills(drive)
-        }
-    }
-}
-
 /** 방송 중 표시 — DJ가 진행하고 노래가 나오는 동안 금빛 점이 숨 쉰다. */
 @Composable
 private fun OnAirBadge(onAir: Boolean) {
@@ -450,6 +466,7 @@ private fun StagePanel(view: Section, m: StageModel, player: Player?, modifier: 
             Crossfade(targetState = view, animationSpec = tween(250), label = "view", modifier = Modifier.weight(1f).fillMaxWidth()) { shown ->
                 when {
                     shown == Section.DJ -> DjView(m, Modifier.fillMaxSize())
+                    shown == Section.CREATE -> CreateView(m, player, Modifier.fillMaxSize())
                     shown == Section.DEMO -> DemoView(
                         m.app, m.drive, m.driving, m.talks, m.onToggleTalks,
                         onStartMusic = { player?.let { if (m.ui.hasItems) it.play() else playList(it, Shelf.PICKS.id) } },
@@ -509,7 +526,11 @@ private fun PlayView(m: StageModel, modifier: Modifier) {
                 Spacer(Modifier.height(10.dp))
                 Text(ui.singer.orEmpty(), style = body(DjType.BodyL, DjColors.Gold2, FontWeight.SemiBold), maxLines = 1, overflow = TextOverflow.Ellipsis)
                 val style = Labels.style(ui.style)
-                if (style != null || ui.made) {
+                if (m.ad != null) {
+                    // 광고가 나오는 중 — 광고임과 광고주, 생성권까지 남은 횟수를 곡 정보 자리에서 알린다.
+                    Spacer(Modifier.height(18.dp))
+                    AdBanner(m.ad.title, m.adNote)
+                } else if (style != null || ui.made) {
                     Spacer(Modifier.height(18.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         if (ui.made) MadeTag()
@@ -553,11 +574,13 @@ private fun DjView(m: StageModel, modifier: Modifier) {
     val line = m.dj.line
     Column(modifier) {
         Row(verticalAlignment = Alignment.CenterVertically) {
+            val avatar = Art.dj(m.djId)
             Box(
-                Modifier.size(92.dp).clip(CircleShape).background(Brush.linearGradient(listOf(DjColors.Gold2, DjColors.Gold, DjColors.GoldDeep))),
+                Modifier.size(132.dp).clip(CircleShape).background(Brush.linearGradient(listOf(DjColors.Gold2, DjColors.Gold, DjColors.GoldDeep))).border(2.5.dp, DjColors.GoldRing, CircleShape),
                 contentAlignment = Alignment.Center,
             ) {
-                Icon(DjIcons.Mic, contentDescription = null, tint = DjColors.OnGold, modifier = Modifier.size(50.dp))
+                if (avatar != null) Image(painterResource(avatar), contentDescription = m.djName, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+                else Icon(DjIcons.Mic, contentDescription = null, tint = DjColors.OnGold, modifier = Modifier.size(64.dp))
             }
             Spacer(Modifier.width(24.dp))
             Column(Modifier.weight(1f)) {
@@ -607,6 +630,110 @@ private fun DjView(m: StageModel, modifier: Modifier) {
                 active = m.talks,
                 onClick = m.onToggleTalks,
             )
+        }
+    }
+}
+
+/** 트롯생성 칸 — 트롯 제작실([CreateStudio]). 사연 신청 → 제작 중계 → 첫 방송. */
+@Composable
+private fun CreateView(m: StageModel, player: Player?, modifier: Modifier) {
+    CreateStudio(m.app, m.request, m.djId, m.djName, m.drive, m.driving, m.ui.songId, m.ui.playing, player, modifier)
+}
+
+/**
+ * DJ 카드 — 넓은 창의 오른쪽 열 위에 늘 보인다. 큰 얼굴, 이름과 ON AIR, 방금 한 말. 다시 듣기와 멘트 켜기는 설정 버튼([DjMenu]) 뒤에 있다.
+ * 🔑 DJ가 이 앱의 얼굴이라 어느 탭에 있어도 보이게 한다. 얼굴 그림이 없는 DJ는 금빛 마이크로 대신한다.
+ */
+@Composable
+private fun DjCard(m: StageModel) {
+    val line = m.dj.line
+    val onAir = m.ui.playing && m.talks
+    Row(
+        Modifier.fillMaxWidth().djCard(radius = 36.dp, background = DjColors.Paper, line = if (onAir) DjColors.GoldRing else DjColors.LineStrong).padding(28.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        // 큰 얼굴 — 금빛 고리, 말하는 중에는 은은하게 빛난다.
+        val avatar = Art.dj(m.djId)
+        Box(
+            Modifier
+                .size(196.dp)
+                .then(if (onAir) Modifier.shadow(26.dp, CircleShape, ambientColor = DjColors.Gold, spotColor = DjColors.Gold) else Modifier)
+                .clip(CircleShape)
+                .background(Brush.linearGradient(listOf(DjColors.Gold2, DjColors.Gold, DjColors.GoldDeep)))
+                .border(3.dp, Brush.verticalGradient(listOf(DjColors.Gold2, DjColors.SatinEdge, DjColors.Gold, DjColors.GoldDeep)), CircleShape),
+            contentAlignment = Alignment.Center,
+        ) {
+            if (avatar != null) Image(painterResource(avatar), contentDescription = m.djName, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+            else Icon(DjIcons.Mic, contentDescription = null, tint = DjColors.OnGold, modifier = Modifier.size(96.dp))
+        }
+        Spacer(Modifier.width(28.dp))
+        Column(Modifier.weight(1f).height(196.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                // 이름과 ON AIR가 남는 폭을 다 쓰고, 설정 버튼은 오른쪽 끝에 붙는다.
+                Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
+                    Text(m.djName, style = headline(DjType.TitleL, DjColors.Gold2), maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+                    Spacer(Modifier.width(16.dp))
+                    OnAirBadge(onAir)
+                }
+                Spacer(Modifier.width(12.dp))
+                DjMenu(m)
+            }
+            Spacer(Modifier.height(14.dp))
+            // 방금 한 말 — 버튼이 있던 자리까지 넓게 쓴다. 자막처럼 크게 보인다.
+            Text(
+                when {
+                    !m.talks -> "멘트를 꺼 두었어요. 노래만 이어서 틀어요."
+                    line != null -> "“${m.drive.brief(line)}”"
+                    else -> "다음 곡을 틀 때 인사할게요."
+                },
+                style = body(DjType.BodyM, if (line != null && m.talks) DjColors.Ink else DjColors.Muted, FontWeight.Medium),
+                maxLines = if (m.driving) 2 else 3,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
+/**
+ * DJ 카드의 설정 버튼 — 누르면 작은 메뉴가 열린다(다시 듣기, 멘트 켜기·끄기). 바깥을 누르면 닫힌다.
+ * 🔑 카드에는 DJ의 말만 크게 두고, 가끔 쓰는 조작은 이 버튼 뒤로 모은다.
+ */
+@Composable
+private fun DjMenu(m: StageModel) {
+    var open by remember { mutableStateOf(false) }
+    val source = remember { MutableInteractionSource() }
+    Box {
+        Box(
+            Modifier
+                .size(64.dp)
+                .pressScale(source)
+                .clip(CircleShape)
+                .background(if (open) DjColors.Selected else DjColors.Card)
+                .border(1.5.dp, if (open) DjColors.Gold else DjColors.LineStrong, CircleShape)
+                .tap(source, label = "DJ 설정") { open = !open },
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(DjIcons.Settings, contentDescription = "DJ 설정", tint = DjColors.Gold2, modifier = Modifier.size(34.dp))
+        }
+        if (open) {
+            Popup(alignment = Alignment.TopEnd, offset = IntOffset(0, with(LocalDensity.current) { 76.dp.roundToPx() }), onDismissRequest = { open = false }, properties = PopupProperties(focusable = true)) {
+                Column(
+                    Modifier.width(340.dp).shadow(24.dp, RoundedCornerShape(24.dp)).djCard(radius = 24.dp, background = DjColors.CardRaised, line = DjColors.GoldRing).padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    ActionButton(DjIcons.Replay, "다시 듣기", Modifier.fillMaxWidth(), enabled = m.dj.line != null && m.talks) {
+                        open = false
+                        m.onReplay()
+                    }
+                    ActionButton(
+                        if (m.talks) DjIcons.VolumeOn else DjIcons.VolumeOff,
+                        if (m.talks) "멘트 켜짐" else "멘트 꺼짐",
+                        Modifier.fillMaxWidth(),
+                        active = m.talks,
+                        onClick = m.onToggleTalks,
+                    )
+                }
+            }
         }
     }
 }
@@ -670,6 +797,26 @@ private fun Transport(ui: PlayerUi, progress: Progress, player: Player) {
             RingButton(DjIcons.Previous, "이전 곡", size = 108.dp, enabled = ui.hasPrevious || progress.positionMs > 3_000) { player.seekToPrevious() }
             PlayButton(ui.playing, ui.loading, size = 156.dp) { togglePlay(player, ui) }
             RingButton(DjIcons.Next, "다음 곡", size = 108.dp, enabled = ui.hasNext) { player.seekToNextMediaItem() }
+        }
+    }
+}
+
+/** 광고 표시 — 금빛 "광고" 딱지와 광고주 이름, 그 아래 줄에 생성권까지의 진행(옆에 두면 좁은 자리에서 잘린다). */
+@Composable
+private fun AdBanner(title: String, note: String?) {
+    val shape = RoundedCornerShape(10.dp)
+    Column {
+        Row(
+            Modifier.clip(shape).background(Brush.linearGradient(listOf(DjColors.Gold2, DjColors.Gold))).padding(start = 10.dp, end = 14.dp, top = 6.dp, bottom = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(DjIcons.VolumeOn, contentDescription = null, tint = DjColors.OnGold, modifier = Modifier.size(20.dp))
+            Spacer(Modifier.width(6.dp))
+            Text("광고 · $title", style = body(DjType.LabelS, DjColors.OnGold, FontWeight.Bold), maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+        if (note != null) {
+            Spacer(Modifier.height(8.dp))
+            Text(note, style = body(DjType.LabelS, DjColors.Gold2, FontWeight.Medium), maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
     }
 }

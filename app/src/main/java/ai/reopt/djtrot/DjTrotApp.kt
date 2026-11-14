@@ -3,6 +3,7 @@ package ai.reopt.djtrot
 import ai.reopt.djtrot.account.Connection
 import ai.reopt.djtrot.account.DeviceAccount
 import ai.reopt.djtrot.account.DeviceVault
+import ai.reopt.djtrot.account.SongAccess
 import ai.reopt.djtrot.api.Ad
 import ai.reopt.djtrot.api.DjConfig
 import ai.reopt.djtrot.api.DjInfo
@@ -13,6 +14,8 @@ import ai.reopt.djtrot.car.Destination
 import ai.reopt.djtrot.car.GeoPoint
 import ai.reopt.djtrot.dj.Ads
 import ai.reopt.djtrot.dj.AutoDemo
+import ai.reopt.djtrot.dj.Demo
+import ai.reopt.djtrot.dj.adPauseSeconds
 import ai.reopt.djtrot.dj.DemoDrive
 import ai.reopt.djtrot.dj.DemoEvent
 import ai.reopt.djtrot.dj.DemoScenario
@@ -170,20 +173,36 @@ class DjTrotApp : Application() {
         getSharedPreferences(PREFS, MODE_PRIVATE).edit(commit = true) { putString(KEY_SERVER, next.name) }
         restart()
     }
-    val catalog by lazy { Catalog(api, account) }
-    val orders by lazy { SongOrders(api, account, catalog, scope) }
+    val catalog by lazy { Catalog(api) { songAccess } }
+
+    /** 드라이브 노래 자격 — 연결한 차는 기기 세션, 아니면 시연 손님 ID. */
+    val songAccess by lazy { SongAccess(account, ::guestId, { creationGuest.value }) }
+
+    /**
+     * 시연 손님 ID — 처음 쓸 때 만들어 기기에 둔다. 🔑 데이터 지우기에도 남긴다(이 차가 시연으로 만든 곡을 다시 찾는 열쇠).
+     * 서버마다 따로 둔다 — 로컬에서 만든 곡의 ID로 운영 서버에 묻지 않게.
+     */
+    private fun guestId(): String {
+        val prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
+        val key = "guest_${server.name.lowercase()}"
+        return prefs.getString(key, null) ?: java.util.UUID.randomUUID().toString().also { prefs.edit(commit = true) { putString(key, it) } }
+    }
+    val orders by lazy { SongOrders(api, account, songAccess, catalog, scope) }
 
     /** 광고 — 장소에 맞는 광고 음악과 생성권 진행. */
     val ads by lazy { Ads(api, account, scope) }
 
     /** 시뮬레이션이 "이 광고의 장소에 가까워졌다"고 재생 서비스에 보내는 신호(광고 ID). */
-    val adCues = MutableSharedFlow<String>(extraBufferCapacity = 1)
+    val adCues = MutableSharedFlow<AdCue>(extraBufferCapacity = 1)
+
+    /** 광고 신호 — [now]가 참이면 다음 곡으로 미루지 않고 지금 곡을 넘겨 바로 튼다(자동 시연). */
+    data class AdCue(val id: String, val now: Boolean = false)
 
     /**
      * 시뮬레이션 — 그 광고의 조건에 맞는 장소를 덧씌우고 광고를 바로 틀게 한다.
      * 🔑 조건의 첫 번째(낱말 → 목적지 종류 → 좌표)로 장소를 만든다. 쉬는 시간은 보지 않는다.
      */
-    fun demoAd(ad: Ad) {
+    fun demoAd(ad: Ad, now: Boolean = false) {
         val before = demo.value ?: DemoDrive()
         val conditions = ad.conditions
         val next = when {
@@ -194,7 +213,7 @@ class DjTrotApp : Application() {
         }
         demo.value = next
         car.stage(next::apply)
-        adCues.tryEmit(ad.id)
+        adCues.tryEmit(AdCue(ad.id, now))
     }
     val car by lazy { CarSignals(this) }
     val voice: DjVoice by lazy { FallbackDjVoice(this) }
@@ -203,6 +222,12 @@ class DjTrotApp : Application() {
 
     /** 고를 수 있는 DJ — 서버 설정이 알려 준다. 받기 전이나 예전 서버면 기본 DJ 하나다. */
     val djs = MutableStateFlow(listOf(DjInfo.DEFAULT))
+
+    /** 노래 만들기가 열려 있는가 — 서버 설정이 닫으면 트롯생성 칸이 주문을 받지 않는다. 설정을 받기 전에는 열림으로 본다. */
+    val creationOpen = MutableStateFlow(true)
+
+    /** 시연 모드 — 휴대폰을 연결하지 않아도 생성권 없이 만든다(서버 설정). */
+    val creationGuest = MutableStateFlow(false)
 
     /** 지금 고른 DJ의 ID. 기기에만 저장한다. */
     val djId by lazy { MutableStateFlow(getSharedPreferences(PREFS, MODE_PRIVATE).getString(KEY_DJ, null) ?: DjInfo.DEFAULT_ID) }
@@ -231,6 +256,8 @@ class DjTrotApp : Application() {
     /** 서버 설정을 받았다 — 선택지 이름과 DJ 목록을 갈아 끼운다. 고른 DJ가 준비되지 않았으면 기본 DJ로 돌아간다. */
     private fun configured(config: DjConfig) {
         Labels.update(config)
+        creationOpen.value = config.creation.open
+        creationGuest.value = config.creation.open && config.creation.guest
         djs.value = config.djs.ifEmpty { listOf(DjInfo.DEFAULT) }
         if (djs.value.none { it.id == djId.value && it.ready }) djId.value = DjInfo.DEFAULT_ID
     }
@@ -293,10 +320,20 @@ class DjTrotApp : Application() {
         autoJob?.cancel()
         autoJob = scope.launch {
             delay(leadMs)
-            scenario.steps.forEachIndexed { index, step ->
-                autoDemo.value = AutoDemo(scenario.id, scenario.title, index, scenario.steps.size, step.label)
-                demo(step)
-                delay(step.pauseSeconds * 1000L)
+            // 🔑 광고 차례는 등록된 광고를 길마다 돌려 가며 고른다. 광고가 없으면 건너뛴다.
+            val ads = this@DjTrotApp.ads.list.value
+            val steps = scenario.steps.filter { !it.ad || ads.isNotEmpty() }
+            val pick = ads.getOrNull(Math.floorMod(Demo.SCENARIOS.indexOf(scenario), ads.size.coerceAtLeast(1)))
+            steps.forEachIndexed { index, step ->
+                val ad = pick.takeIf { step.ad }
+                autoDemo.value = AutoDemo(scenario.id, scenario.title, index, steps.size, ad?.let { "광고 · ${it.title}" } ?: step.label)
+                if (ad != null) {
+                    demoAd(ad, now = true)
+                    delay(adPauseSeconds(ad.maxSeconds) * 1000L)
+                } else {
+                    demo(step)
+                    delay(step.pauseSeconds * 1000L)
+                }
             }
             autoDemo.value = null
         }

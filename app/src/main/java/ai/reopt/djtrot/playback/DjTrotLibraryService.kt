@@ -78,6 +78,9 @@ class DjTrotLibraryService : MediaLibraryService() {
 
     /** 지금 나오는 광고. 끝까지 들으면 서버에 알린다. */
     private var playingAd: Ad? = null
+
+    /** 광고 바로 다음에 나오는 곡의 ID — 이 곡은 DJ가 소개하지 않는다. */
+    private var afterAd: String? = null
     /** 이번 재생 목록에서 DJ가 소개한 곡 수 — 설정의 간격([DjTrotApp.fullEvery])마다만 길게 말한다. */
     private var introduced = 0
     private var briefJob: Job? = null
@@ -122,9 +125,12 @@ class DjTrotLibraryService : MediaLibraryService() {
         }
         // 시뮬레이션의 광고 버튼 — 쉬는 시간을 보지 않고 그 광고를 바로 다음 곡으로 끼운다.
         scope.launch {
-            app.adCues.collect { id ->
+            app.adCues.collect { cue ->
                 if (!player.isPlaying) return@collect
-                queueAd(app.ads.list.value.firstOrNull { it.id == id } ?: return@collect)
+                val ad = app.ads.list.value.firstOrNull { it.id == cue.id } ?: return@collect
+                queueAd(ad)
+                // 자동 시연 — 지금 곡을 넘겨 광고를 바로 튼다. 넘긴 곡은 광고가 아니라 건너뜀으로 세지 않는다.
+                if (cue.now && queuedAd == ad.id) player.seekToNextMediaItem()
             }
         }
         // 신청한 노래가 완성되면 지금 곡 다음에 넣고 DJ가 알린다.
@@ -222,7 +228,7 @@ class DjTrotLibraryService : MediaLibraryService() {
      */
     private fun queueAd(ad: Ad) {
         if (queuedAd == ad.id || player.mediaItemCount == 0) return
-        val item = catalog.ad(ad.song)
+        val item = catalog.ad(ad.song, ad.maxSeconds)
         player.addMediaItem(player.currentMediaItemIndex + 1, item)
         queuedAd = ad.id
         app.ads.queued(ad)
@@ -238,31 +244,47 @@ class DjTrotLibraryService : MediaLibraryService() {
         val nextAd = app.ads.adOf(next?.mediaMetadata?.extras?.getString(Catalog.EXTRA_SONG_ID))
         playingAd = nextAd
         if (nextAd != null && queuedAd == nextAd.id) queuedAd = null
-        if (finished != null && reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO) heardAd(finished)
+        if (finished == null) return
+        // 🔑 광고 바로 다음 곡은 DJ가 길게 소개하지 않는다 — 광고를 듣고 난 뒤의 한마디(생성권 진행)와 겹치지 않게.
+        afterAd = next?.mediaId
+        if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO) heardAd(finished)
+        else app.dj.update { it.say("광고를 끝까지 듣지 않아 횟수에 넣지 않았어요.") }
     }
 
     /** 광고를 끝까지 들었다 — 서버에 알리고, 생성권이 생겼으면 화면에 알린다. */
     private fun heardAd(ad: Ad) {
+        app.ads.played(ad, "completed")
         scope.launch {
             val progress = app.ads.heard(ad) ?: return@launch
-            val line = when {
-                progress.granted -> "광고를 ${progress.needed}번 들어서 생성권 한 장이 생겼어요!"
-                progress.capped -> "생성권이 가득 찼어요. 노래를 만들면 광고로 다시 받을 수 있어요."
-                else -> "광고 ${progress.progress}/${progress.needed} · ${progress.needed - progress.progress}번 더 들으면 생성권 한 장이에요."
-            }
-            app.dj.update { it.say(line) }
             if (progress.granted) app.orders.refreshTokens()
+            // DJ가 받아 둔 조각으로 진행을 알린다. 조각이 없거나 DJ 멘트가 꺼져 있으면 글로만 알린다.
+            val (fragmentId, line) = when {
+                progress.granted -> "ad.outro.granted" to "광고를 ${progress.needed}번 들어서 생성권 한 장이 생겼어요!"
+                progress.limited -> null to "오늘 광고로 받을 수 있는 생성권을 다 받았어요. 내일 다시 받을 수 있어요."
+                progress.capped -> "ad.outro.capped" to "생성권이 가득 찼어요. 노래를 만들면 광고로 다시 받을 수 있어요."
+                progress.progress == 1 -> "ad.outro.1" to "광고 1/${progress.needed} · 두 번 더 들으면 생성권 한 장이에요."
+                else -> "ad.outro.2" to "광고 ${progress.progress}/${progress.needed} · 한 번만 더 들으면 생성권 한 장이에요."
+            }
+            if (fragmentId != null && app.djTalks && player.isPlaying) moment(fragmentId, line) else app.dj.update { it.say(line) }
         }
     }
 
     private fun announce(item: MediaItem?, demo: Boolean = false) {
         if (item == null || !app.djTalks) return
-        // 광고 음악은 DJ가 소개하지 않는다 — 화면에 광고임을 알리기만 한다.
+        // 광고 음악 — 곡 소개 대신 "이 근처 소식" 한마디만 한다(받아 둔 조각이 있으면 DJ 목소리로).
         app.ads.adOf(item.mediaMetadata.extras?.getString(Catalog.EXTRA_SONG_ID))?.let { ad ->
             if (item.mediaId != announced) {
                 announced = item.mediaId
-                app.dj.update { it.say("광고 · ${ad.title}") }
+                app.ads.played(ad, "started")
+                briefJob?.cancel()
+                briefJob = scope.launch { moment("ad.intro.${Math.floorMod(ad.id.hashCode(), 2) + 1}", "광고 · ${ad.title}") }
             }
+            return
+        }
+        // 광고 바로 다음 곡 — 길게 소개하지 않고 넘어간다(광고 뒤의 한마디가 나오는 자리다).
+        if (item.mediaId == afterAd) {
+            afterAd = null
+            announced = item.mediaId
             return
         }
         if (item.mediaId == announced) return refreshSuggestion(item)
@@ -482,8 +504,8 @@ class DjTrotLibraryService : MediaLibraryService() {
      */
     private fun authorizedSource(): DataSource.Factory = ResolvingDataSource.Factory(DefaultDataSource.Factory(this)) { spec ->
         if (!app.api.needsToken(spec.uri.toString())) return@Factory spec
-        val token = runBlocking { runCatching { app.account.token() }.getOrNull() } ?: return@Factory spec
-        spec.withAdditionalHeaders(mapOf("Authorization" to "Bearer $token"))
+        // 연결한 차는 세션, 아니면 시연 손님 ID — 시연으로 만든 곡도 같은 주소로 받는다.
+        spec.withAdditionalHeaders(runBlocking { app.songAccess.headers() })
     }
 
     private inner class PlayerEvents : Player.Listener {

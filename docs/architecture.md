@@ -38,7 +38,7 @@ flowchart TB
 | `car/` | 차량 신호를 모아 `DriveContext` 하나로(`CarSignals`, `AaosCar`) |
 | `dj/` | 멘트 템플릿(`DjScript`), 음성 조각 고르기(`VoiceLines`)와 받아 둔 음성 팩(`VoicePackStore`), 기기에서 짓는 사연(`StoryBuilder`), 목소리(`DjVoice`), 노래 주문(`SongOrders`) |
 | `playback/` | 재생 서비스(`DjTrotLibraryService`), 브라우즈 트리의 모양(`MediaPath`, `Shelf`), 목록·검색·큐(`Catalog`) |
-| `ui/` | 화면. 무대(`DjScreen`), 목록과 신청곡(`Shelf`), 휴대폰 연결(`ConnectActivity`), 공통 부품과 테마 |
+| `ui/` | 화면. 무대(`DjScreen`), 목록(`Shelf`), 트롯 제작실(`CreateStudio`), 휴대폰 연결(`ConnectActivity`), 공통 부품과 테마 |
 
 ## 상태는 어디에 있나
 
@@ -96,7 +96,7 @@ sequenceDiagram
 
 ## 노래 주문
 
-`SongOrders`가 앱 범위 코루틴에서 `POST /songs`를 보내고 5초마다 상태를 확인합니다. 응답을 받지 못하고 실패한 주문을 다시 누르면 같은 `requestKey`를 보내서, 첫 요청이 서버에 닿았더라도 한 곡만 만들어집니다. 완성되면 `Catalog.register()`로 "내 드라이브 노래"에 넣고 `ready`로 내보냅니다. 서비스가 그 곡을 지금 곡 다음에 넣고 DJ가 알립니다. 화면을 닫아도 주문은 끝까지 지켜봅니다. 전체 흐름은 README의 순서도에 있습니다.
+`SongOrders`가 앱 범위 코루틴에서 `POST /songs`를 보내고 3초마다 상태를 확인합니다. 서버가 알려 주는 단계(작사·작곡·마무리)와 제목·가사 몇 줄은 트롯생성 칸(`ui/CreateStudio`)이 사연 신청 → 제작 중계 → 첫 방송 세 막으로 보여 줍니다. 서버 설정이 노래 만들기를 닫아 두면 만들기 버튼을 잠급니다. 서버가 시연 모드를 켜 두면 휴대폰을 연결하지 않은 차도 기기에 만든 손님 ID(`account/SongAccess`)로 생성권 없이 만들고, 그 ID로 만든 곡을 다시 읽습니다. 손님 ID에는 개인 정보가 없습니다. 응답을 받지 못하고 실패한 주문을 다시 누르면 같은 `requestKey`를 보내서, 첫 요청이 서버에 닿았더라도 한 곡만 만들어집니다. 완성되면 `Catalog.register()`로 "내 드라이브 노래"에 넣고 `ready`로 내보냅니다. 서비스가 그 곡을 지금 곡 다음에 넣고 DJ가 알립니다. 화면을 닫아도 주문은 끝까지 지켜봅니다. 전체 흐름은 README의 순서도에 있습니다.
 
 ## 주행 중 제한
 

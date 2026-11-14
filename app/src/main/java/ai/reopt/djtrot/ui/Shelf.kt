@@ -59,6 +59,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.clickable
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
@@ -71,202 +79,13 @@ import androidx.compose.ui.unit.sp
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 
-/** 오른쪽 열 — 신청곡 사연 위, 노래 고르기 아래. 주행 중에는 노래 고르기 대신 짧은 안내. */
+/** 오른쪽 열 — 위에는 DJ([top]), 아래는 노래 고르기. 주행 중에는 노래 고르기 대신 짧은 안내. */
 @Composable
-fun RightRail(app: DjTrotApp, shelf: ShelfMemory, request: SongRequest, drive: DriveContext, driving: Boolean, ui: PlayerUi, player: Player?, modifier: Modifier) {
+fun RightRail(app: DjTrotApp, shelf: ShelfMemory, driving: Boolean, ui: PlayerUi, player: Player?, modifier: Modifier, top: @Composable () -> Unit) {
     Column(modifier, verticalArrangement = Arrangement.spacedBy(24.dp)) {
-        RequestCard(app, request, drive, driving, ui.songId)
-        if (driving) {
-            DrivingCard(ui, Modifier.weight(1f))
-        } else {
-            SongShelf(app, shelf, ui, player, Modifier.weight(1f))
-        }
+        top()
+        LockableShelf(app, shelf, driving, ui, player, Modifier.weight(1f))
     }
-}
-
-// ── 신청곡 사연 ─────────────────────────────────────────
-
-/**
- * 이 길의 신청곡 — DJ 브리프(AI)가 제안한 사연과 장르. 휴대폰을 연결하면 토큰 1개로 이 사연의 노래를 만든다.
- * 🔴 휴대폰 연결(QR 로그인)과 만들기는 정차 중에만 연다 — Pleos 정책상 QR 로그인은 모든 지역에서 주행 중 금지.
- * 🔑 작곡은 약 2분. 앱 범위에서 지켜보다 완성되면 재생 서비스가 지금 곡 다음에 넣는다.
- * 🔑 맡긴 뒤로는 맡긴 사연을 보인다 — 그 사이 곡이 바뀌어 DJ가 새 사연을 제안해도 카드가 다른 노래를 말하지 않게.
- */
-@Composable
-fun RequestCard(app: DjTrotApp, suggestion: SongRequest, drive: DriveContext, driving: Boolean, nowSongId: String?) {
-    val connection by app.account.connection.collectAsStateWithLifecycle()
-    val tokens by app.orders.tokens.collectAsStateWithLifecycle()
-    // 광고 진행 — 광고가 있고 휴대폰을 연결했을 때만 보인다. "광고 1/3"
-    val ads by app.ads.list.collectAsStateWithLifecycle()
-    val adProgress by app.ads.progress.collectAsStateWithLifecycle()
-    val adLine = adProgress?.takeIf { ads.isNotEmpty() }?.let { if (it.capped) "광고 생성권 가득" else "광고 ${it.progress}/${it.needed}" }
-    val order by app.orders.current.collectAsStateWithLifecycle()
-    val hearing by app.mic.state.collectAsStateWithLifecycle()
-    val dj by app.dj.collectAsStateWithLifecycle()
-    val context = LocalContext.current
-    // 화면을 떠나면 그만 듣는다. 그때까지 들은 말은 사연으로 남는다.
-    DisposableEffect(Unit) { onDispose { app.mic.stop() } }
-    val connected = connection is Connection.Connected
-    val parked = !driving && !drive.noSetup
-    val request = order?.request ?: suggestion
-    Column(
-        Modifier
-            .fillMaxWidth()
-            .djCard(radius = 30.dp)
-            .background(Brush.verticalGradient(listOf(DjColors.Cream.copy(alpha = 0.55f), Color.Transparent)))
-            .padding(horizontal = 34.dp, vertical = 30.dp),
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(DjIcons.Sparkle, contentDescription = null, tint = DjColors.Gold, modifier = Modifier.size(30.dp))
-            Spacer(Modifier.width(12.dp))
-            Text("이 길의 생성곡", style = body(DjType.BodyS, DjColors.Gold, FontWeight.Bold))
-            Spacer(Modifier.weight(1f))
-            Tag(request.topicLabel)
-            Spacer(Modifier.width(10.dp))
-            Tag(request.styleLabel)
-        }
-        Spacer(Modifier.height(18.dp))
-        val current = order
-        when {
-            hearing.listening && (driving || hearing.heard.isBlank()) -> Text("듣고 있어요. 사연을 말씀해 주세요", style = body(DjType.BodyM, DjColors.Gold2))
-            hearing.listening -> Text("“${hearing.heard}”", style = headline(DjType.TitleS, DjColors.Gold2, FontWeight.Bold), maxLines = 2, overflow = TextOverflow.Ellipsis)
-            driving -> Text("정차하면 사연을 보여 드릴게요", style = body(DjType.BodyM, DjColors.Muted))
-            else -> Text("“${request.story}”", style = headline(DjType.TitleS, DjColors.Ink, FontWeight.Bold), maxLines = 2, overflow = TextOverflow.Ellipsis)
-        }
-        // 🔑 말로 넣는 사연(Pleos SpeechToText) — 주행 중에도 손 대신 말로 넣을 수 있다. 맡긴 뒤에는 사연을 바꾸지 않는다.
-        if (current == null) {
-            Spacer(Modifier.height(18.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Pill(
-                    icon = DjIcons.Mic,
-                    text = when {
-                        hearing.listening -> "다 말했어요"
-                        dj.freshSpoken() != null -> "사연 다시 말하기"
-                        else -> "말로 사연 넣기"
-                    },
-                    active = hearing.listening,
-                    onClick = { if (hearing.listening) app.mic.stop() else app.mic.listen() },
-                )
-                hearing.problem?.let { problem ->
-                    Spacer(Modifier.width(16.dp))
-                    Text(problem, style = body(DjType.LabelS, DjColors.Muted), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                }
-            }
-        }
-        Spacer(Modifier.height(24.dp))
-        when {
-            current != null && current.working -> OrderProgress(current)
-            current != null && current.state == "ready" -> {
-                val title = current.song?.title.orEmpty()
-                val text = if (current.song?.id == nowSongId) "‘$title’ 지금 들려 드리고 있어요" else "‘$title’ 완성! 다음 곡으로 들려 드려요"
-                OrderNote(DjIcons.Sparkle, text, onClose = app.orders::dismiss)
-            }
-            current != null && current.state == "failed" -> ErrorNotice(current.problem ?: "노래를 만들지 못했어요.", action = "닫기", onAction = app.orders::dismiss)
-            !connected -> RequestAction(
-                icon = DjIcons.Phone,
-                text = "휴대폰 연결하고 만들기",
-                hint = if (parked) "PIN·QR로 1분" else "정차하면 연결할 수 있어요",
-                enabled = parked,
-            ) { context.startActivity(Intent(context, ConnectActivity::class.java)) }
-            else -> RequestAction(
-                icon = DjIcons.Sparkle,
-                text = "이 사연으로 노래 만들기",
-                hint = when {
-                    !parked -> "정차하면 만들 수 있어요"
-                    tokens == 0 -> "토큰이 없어요 · 휴대폰에서 받아 주세요"
-                    tokens != null && adLine != null -> "토큰 1개 · ${tokens}개 남음 · $adLine"
-                    tokens != null -> "토큰 1개 · ${tokens}개 남음"
-                    else -> "토큰 1개"
-                },
-                enabled = parked && tokens != 0,
-                gold = true,
-            ) {
-                app.orders.create(request, drive.toInput(LocalTime.now(), app.spoken))
-                app.dj.update { it.forget() }
-            }
-        }
-    }
-}
-
-/** 신청곡 카드의 큰 버튼. 금빛은 만들기, 테두리는 연결. 누를 수 없을 때는 이유를 오른쪽에 적는다. */
-@Composable
-private fun RequestAction(icon: ImageVector, text: String, hint: String, enabled: Boolean, gold: Boolean = false, onClick: () -> Unit) {
-    val shape = RoundedCornerShape(20.dp)
-    val source = remember { MutableInteractionSource() }
-    val active = enabled && gold
-    Row(
-        Modifier
-            .then(if (enabled) Modifier.pressScale(source, depth = 0.98f) else Modifier)
-            .fillMaxWidth()
-            .height(86.dp)
-            .clip(shape)
-            .background(if (active) DjColors.Selected else DjColors.CardRaised)
-            .border(1.5.dp, if (active) DjColors.Gold.copy(alpha = 0.8f) else DjColors.LineStrong, shape)
-            .tap(source, enabled = enabled, label = text, onClick = onClick)
-            .padding(horizontal = 26.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Icon(if (enabled) icon else DjIcons.Lock, contentDescription = null, tint = if (enabled) DjColors.Gold else DjColors.Faint, modifier = Modifier.size(30.dp))
-        Spacer(Modifier.width(14.dp))
-        Text(text, style = body(DjType.BodyS, if (enabled) DjColors.Gold2 else DjColors.Muted, FontWeight.Bold), modifier = Modifier.weight(1f), maxLines = 1)
-        Text(hint, style = body(DjType.LabelS, DjColors.Muted), maxLines = 1)
-    }
-}
-
-/**
- * 작곡 진행 — 맡김 → 차례 → 작곡. 기다린 시간을 초 단위로 센다(약 2분).
- * 🔑 주행 중에는 바뀌는 숫자 대신 "약 2분"으로 둔다.
- */
-@Composable
-private fun OrderProgress(order: Order) {
-    val calm = LocalCalm.current
-    var now by remember { mutableLongStateOf(SystemClock.elapsedRealtime()) }
-    LaunchedEffect(order.since, calm) {
-        while (!calm) {
-            now = SystemClock.elapsedRealtime()
-            delay(1_000)
-        }
-    }
-    val waited = ((now - order.since) / 1000).coerceAtLeast(0)
-    val label = when {
-        order.state == "sending" -> "작곡실에 맡기는 중"
-        calm -> "작곡 중이에요 · 약 2분"
-        order.state == "queued" -> "작곡 차례를 기다려요 · %d:%02d".format(waited / 60, waited % 60)
-        else -> "작곡 중이에요 · %d:%02d".format(waited / 60, waited % 60)
-    }
-    Row(
-        Modifier.fillMaxWidth().height(86.dp).djCard(radius = 20.dp, background = DjColors.Selected, line = DjColors.Gold.copy(alpha = 0.6f)).padding(horizontal = 26.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        CircularProgressIndicator(color = DjColors.Gold, strokeWidth = 4.dp, modifier = Modifier.size(32.dp))
-        Spacer(Modifier.width(18.dp))
-        Text(label, style = body(DjType.BodyS, DjColors.Gold2, FontWeight.Bold), modifier = Modifier.weight(1f), maxLines = 1)
-        Text("완성되면 바로 틀어요", style = body(DjType.LabelS, DjColors.Muted), maxLines = 1)
-    }
-}
-
-@Composable
-private fun OrderNote(icon: ImageVector, text: String, onClose: () -> Unit) {
-    Row(
-        Modifier.fillMaxWidth().height(86.dp).djCard(radius = 20.dp, background = DjColors.Selected, line = DjColors.Gold.copy(alpha = 0.8f)).padding(start = 26.dp, end = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Icon(icon, contentDescription = null, tint = DjColors.Gold, modifier = Modifier.size(30.dp))
-        Spacer(Modifier.width(14.dp))
-        Text(text, style = body(DjType.BodyS, DjColors.Gold2, FontWeight.Bold), modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
-        Pill(null, "닫기", onClick = onClose)
-    }
-}
-
-@Composable
-private fun Tag(text: String) {
-    val shape = RoundedCornerShape(10.dp)
-    Text(
-        text,
-        style = body(DjType.LabelS, DjColors.Gold2, FontWeight.SemiBold),
-        maxLines = 1,
-        modifier = Modifier.clip(shape).background(DjColors.Cream).border(1.dp, DjColors.LineStrong, shape).padding(horizontal = 14.dp, vertical = 6.dp),
-    )
 }
 
 // ── 노래 고르기 ────────────────────────────────────────
@@ -296,7 +115,9 @@ fun SongShelf(app: DjTrotApp, shelf: ShelfMemory, ui: PlayerUi, player: Player?,
     var retry by remember { mutableIntStateOf(0) }
     val connection by app.account.connection.collectAsStateWithLifecycle()
     val order by app.orders.current.collectAsStateWithLifecycle()
-    val connected = connection is Connection.Connected
+    val guestOpen by app.creationGuest.collectAsStateWithLifecycle()
+    // 🔑 시연 모드면 연결하지 않아도 이 차가 시연으로 만든 곡이 내 노래에 보인다.
+    val connected = connection is Connection.Connected || guestOpen
 
     // 새 노래가 완성되거나 연결이 바뀌면 내 노래를 다시 받는다.
     LaunchedEffect(order?.state == "ready", connected) { states.remove(Shelf.MINE) }
@@ -348,38 +169,6 @@ internal fun playList(player: Player, listId: String) {
     player.setMediaItem(MediaItem.Builder().setMediaId(listId).build())
     player.prepare()
     player.play()
-}
-
-/**
- * 좁은 창 신청곡 칸 아래 — 연결했으면 길에서 만든 노래, 아직이면 만드는 순서.
- * 🔑 넓은 창은 오른쪽 열의 '내 노래' 탭이 같은 일을 한다.
- */
-@Composable
-fun MadeSongs(app: DjTrotApp, ui: PlayerUi, player: Player?, modifier: Modifier) {
-    val connection by app.account.connection.collectAsStateWithLifecycle()
-    val order by app.orders.current.collectAsStateWithLifecycle()
-    val connected = connection is Connection.Connected
-    // 새 노래가 완성되거나 연결이 바뀌면 다시 받는다.
-    val songs by produceState<List<MediaItem>?>(null, connected, order?.state == "ready") {
-        value = if (connected) runCatching { app.catalog.children(Shelf.MINE) }.getOrDefault(emptyList()) else emptyList()
-    }
-    Column(modifier.fillMaxWidth().djCard(radius = 30.dp).padding(start = 34.dp, end = 20.dp, top = 30.dp)) {
-        Text(if (connected) "길에서 만든 노래" else "이렇게 만들어져요", style = body(DjType.BodyS, DjColors.Gold, FontWeight.Bold))
-        Spacer(Modifier.height(12.dp))
-        val list = songs
-        when {
-            !connected -> Column(Modifier.padding(end = 14.dp)) {
-                Step(1, "정차 중에 휴대폰을 연결해요 · PIN으로 1분")
-                Step(2, "이 길의 사연으로 노래를 맡겨요 · 토큰 1개")
-                Step(3, "약 2분 뒤 다음 곡으로 들려 드려요")
-            }
-            list == null -> Unit
-            list.isEmpty() -> Text("아직 만든 노래가 없어요. 위 사연으로 첫 노래를 만들어 보세요", style = body(DjType.BodyS, DjColors.Muted), modifier = Modifier.padding(end = 14.dp))
-            else -> Box(Modifier.weight(1f)) {
-                SongList(list, ui, fade = DjColors.Card) { index -> playFrom(player, ui, list, index) }
-            }
-        }
-    }
 }
 
 @Composable
@@ -551,45 +340,116 @@ private fun EmptyShelf(text: String) {
 
 // ── 주행 중 ────────────────────────────────────────────
 
-/** 주행 중 — 목록 대신 큰 글씨 안내와 다음 곡 한 줄만. */
+/** 주행 중 잠시 열어 두는 시간. 지나면 저절로 다시 잠근다. */
+private const val PEEK_MS = 20_000L
+
+/**
+ * 노래 고르기 — 주행 중에는 목록 위에 반투명 잠금 막을 덮는다. 목록은 흐릿하게 비쳐 "여기에 노래가 있고 지금은 잠겨 있다"가 한눈에 보인다.
+ * 🔑 "잠시 열기"를 누르면 [PEEK_MS] 동안 목록을 쓸 수 있고, 시간이 지나거나 "다시 잠그기"를 누르면 다시 덮는다. 정차하면 잠금이 저절로 풀린다.
+ * ⚠️ 주행 중 목록 고르기는 운전자의 선택으로만 연다 — 기본은 잠금이고, 열어 둔 채로 남지 않는다.
+ */
 @Composable
-fun DrivingCard(ui: PlayerUi, modifier: Modifier) {
-    Column(modifier.fillMaxWidth().djCard(radius = 30.dp).padding(40.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
+private fun LockableShelf(app: DjTrotApp, shelf: ShelfMemory, driving: Boolean, ui: PlayerUi, player: Player?, modifier: Modifier) {
+    var peekAt by remember { mutableLongStateOf(0L) }
+    val peeking = driving && peekAt > 0L
+    LaunchedEffect(peekAt, driving) {
+        if (!driving) peekAt = 0L
+        if (peekAt == 0L) return@LaunchedEffect
+        delay((peekAt + PEEK_MS - SystemClock.elapsedRealtime()).coerceAtLeast(0))
+        peekAt = 0L
+    }
+    val locked = driving && !peeking
+    val blur by animateDpAsState(if (locked) 14.dp else 0.dp, tween(380), label = "shelfBlur")
+    Box(modifier.fillMaxWidth()) {
+        Column(Modifier.fillMaxSize()) {
+            if (peeking) {
+                PeekBar(onLock = { peekAt = 0L })
+                Spacer(Modifier.height(14.dp))
+            }
+            SongShelf(app, shelf, ui, player, Modifier.weight(1f).fillMaxWidth().blur(blur))
+        }
+        AnimatedVisibility(locked, enter = fadeIn(tween(380)), exit = fadeOut(tween(220)), modifier = Modifier.matchParentSize()) {
+            LockVeil(ui, onPeek = { peekAt = SystemClock.elapsedRealtime() })
+        }
+    }
+}
+
+/** 잠금 막 — 가운데 금빛 자물쇠, 안내, "잠시 열기". 아래에는 다음 곡 한 줄. 막 아래 목록은 누를 수 없다. */
+@Composable
+private fun LockVeil(ui: PlayerUi, onPeek: () -> Unit) {
+    val shape = RoundedCornerShape(30.dp)
+    val swallow = remember { MutableInteractionSource() }
+    Column(
+        Modifier
+            .fillMaxSize()
+            .clip(shape)
+            .background(Brush.verticalGradient(0f to Color(0x99090806), 0.45f to Color(0xD9090806), 1f to Color(0xF2090806)))
+            .border(1.5.dp, DjColors.Line, shape)
+            .clickable(interactionSource = swallow, indication = null, onClick = {})
+            .padding(horizontal = 40.dp, vertical = 34.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Spacer(Modifier.weight(1f))
+        // 금빛 자물쇠 — 바깥 고리는 은은한 빛, 안은 새틴 금.
+        Box(
+            Modifier
+                .size(150.dp)
+                .clip(CircleShape)
+                .background(Brush.radialGradient(listOf(DjColors.Gold.copy(alpha = 0.28f), Color.Transparent))),
+            contentAlignment = Alignment.Center,
+        ) {
             Box(
-                Modifier.size(84.dp).clip(CircleShape).background(DjColors.Cream).border(1.5.dp, DjColors.LineStrong, CircleShape),
+                Modifier
+                    .size(104.dp)
+                    .shadow(20.dp, CircleShape, ambientColor = DjColors.Gold, spotColor = DjColors.GoldDeep)
+                    .clip(CircleShape)
+                    .background(Brush.linearGradient(listOf(DjColors.Gold2, DjColors.Gold, DjColors.GoldDeep)))
+                    .border(2.dp, DjColors.SatinEdge, CircleShape),
                 contentAlignment = Alignment.Center,
             ) {
-                Icon(DjIcons.Car, contentDescription = null, tint = DjColors.Gold, modifier = Modifier.size(46.dp))
+                Icon(DjIcons.Lock, contentDescription = null, tint = DjColors.OnGold, modifier = Modifier.size(50.dp))
             }
-            Spacer(Modifier.width(24.dp))
-            Text("운전에 집중하세요", style = headline(DjType.TitleL))
         }
         Spacer(Modifier.height(22.dp))
-        Text("곡 넘기기는 스티어링 휠 버튼이나\n“트롯 틀어줘”로 해 주세요.", style = body(DjType.BodyM, DjColors.Muted))
+        Text("주행 중 목록 잠금", style = headline(DjType.TitleM, DjColors.Ink), maxLines = 1)
+        Spacer(Modifier.height(10.dp))
+        Text("곡 넘기기는 스티어링 휠 버튼이나 “트롯 틀어줘”로 해 주세요.", style = body(DjType.BodyS, DjColors.Muted), textAlign = TextAlign.Center)
+        Spacer(Modifier.height(26.dp))
+        Pill(DjIcons.Lock, "잠시 열기 · 20초", onClick = onPeek)
         Spacer(Modifier.weight(1f))
         if (ui.nextTitle != null) {
-            Box(Modifier.fillMaxWidth().height(1.dp).background(DjColors.Line))
-            Spacer(Modifier.height(30.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                if (ui.nextMade) {
-                    Icon(DjIcons.Sparkle, contentDescription = null, tint = DjColors.Gold, modifier = Modifier.size(26.dp))
-                    Spacer(Modifier.width(8.dp))
-                }
-                Text(if (ui.nextMade) "다음은 생성곡" else "다음 곡", style = body(DjType.LabelM, DjColors.Gold, FontWeight.Bold))
-            }
-            Spacer(Modifier.height(16.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Cover(ui.nextArtworkUri, ui.nextStyle, size = 120.dp, radius = 20.dp, seed = ui.nextSongId)
-                Spacer(Modifier.width(24.dp))
+            Row(
+                Modifier.fillMaxWidth().djCard(radius = 24.dp, background = DjColors.Card.copy(alpha = 0.9f)).padding(horizontal = 24.dp, vertical = 20.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Cover(ui.nextArtworkUri, ui.nextStyle, size = 84.dp, radius = 16.dp, seed = ui.nextSongId)
+                Spacer(Modifier.width(20.dp))
                 Column(Modifier.weight(1f)) {
-                    Text(ui.nextTitle, style = headline(DjType.TitleM, DjColors.Ink, FontWeight.Bold), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    ui.nextSinger?.let {
-                        Spacer(Modifier.height(6.dp))
-                        Text(it, style = body(DjType.BodyS, DjColors.Gold2, FontWeight.Medium), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        if (ui.nextMade) {
+                            Icon(DjIcons.Sparkle, contentDescription = null, tint = DjColors.Gold, modifier = Modifier.size(24.dp))
+                            Spacer(Modifier.width(8.dp))
+                        }
+                        Text(if (ui.nextMade) "다음은 생성곡" else "다음 곡", style = body(DjType.LabelM, DjColors.Gold, FontWeight.Bold))
                     }
+                    Spacer(Modifier.height(4.dp))
+                    Text(ui.nextTitle, style = headline(DjType.BodyL, DjColors.Ink, FontWeight.Bold), maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
             }
         }
+    }
+}
+
+/** 잠시 열어 둔 동안 목록 위에 붙는 띠 — 곧 다시 잠근다는 안내와 바로 잠그는 버튼. 주행 중이라 줄어드는 숫자는 쓰지 않는다. */
+@Composable
+private fun PeekBar(onLock: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().djCard(radius = 22.dp, background = DjColors.Selected, line = DjColors.Gold.copy(alpha = 0.6f)).padding(start = 24.dp, end = 10.dp, top = 10.dp, bottom = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(DjIcons.Car, contentDescription = null, tint = DjColors.Gold, modifier = Modifier.size(30.dp))
+        Spacer(Modifier.width(12.dp))
+        Text("목록 잠시 열림 · 20초 뒤 다시 잠금", style = body(DjType.LabelM, DjColors.Gold2, FontWeight.SemiBold), modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Pill(DjIcons.Lock, "다시 잠그기", onClick = onLock)
     }
 }

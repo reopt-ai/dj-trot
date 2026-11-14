@@ -52,7 +52,7 @@ uv run --no-project tools/trigger.py set gear=DRIVE rain=on jam=12 --next     # 
 
 **노래 목록과 메타데이터는 `playback/Catalog`가 쥡니다.** 브라우즈 트리와 메모리 곡 레지스트리입니다. 트리의 모양은 `playback/MediaPath.kt`에 한 번만 적혀 있습니다. 루트 아래 네 폴더 `Shelf`(추천·새 노래·장르·내 노래)는 미디어 센터의 탭이자 화면의 노래 고르기 탭입니다. 미디어 ID 문자열은 `MediaPath.parse()`와 `MediaPath.id`로만 읽고 만듭니다. 탭을 늘리지 말고 폴더 아래에 둡니다. `resolve()`는 목록에서 한 번 본 곡만 압니다. 곡 정보(ID, 장르, 내가 만든 곡인지, 만든 시각)는 `MediaMetadata.extras`의 `djtrot.*` 키로 화면과 서비스에 전해집니다. 화면에서 곡을 고르면 보이는 목록을 통째로 큐로 보내고, 미디어 센터처럼 곡 하나만 오면 그 곡을 마지막으로 보여 준 목록을 이어 틉니다(`queueFor`).
 
-**노래 주문은 앱 범위에서 돕니다.** `dj/SongOrders`는 `POST /songs`를 requestKey로 멱등하게 보내고(응답 없이 실패한 주문을 다시 누르면 같은 키), 5초마다 확인합니다. 완성되면 `catalog.register()` 뒤 `ready`로 내보내고, 서비스가 그 곡을 지금 곡 다음에 넣습니다. 화면을 닫아도 끝까지 지켜봅니다.
+**노래 주문은 앱 범위에서 돕니다.** `dj/SongOrders`는 `POST /songs`를 requestKey로 멱등하게 보내고(응답 없이 실패한 주문을 다시 누르면 같은 키), 3초마다 확인합니다(만드는 단계와 제목·가사 몇 줄을 받아 트롯생성 칸의 제작 중계가 보여 줍니다). 완성되면 `catalog.register()` 뒤 `ready`로 내보내고, 서비스가 그 곡을 지금 곡 다음에 넣습니다. 화면을 닫아도 끝까지 지켜봅니다.
 
 **계정은 휴대폰 페어링으로 받습니다.** `account/DeviceVault`가 기기 자격을 Android Keystore로 암호화해 두고, `account/DeviceAccount`가 1시간 세션 토큰을 메모리에만 둡니다. 로그인 호출은 `account.authorized { token -> … }`로 감쌉니다. 401이면 한 번 새로 받아 다시 부르고, 자격이 철회되면 연결 전 상태로 돌아갑니다. 드라이브 노래 음원(`/songs/…`)에만 서비스의 `authorizedSource()`가 Bearer를 붙입니다.
 

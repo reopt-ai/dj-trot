@@ -72,6 +72,11 @@ class DjTrotApi(
     /** 광고 목록 — 광고 음악과 틀 조건. 장소 판단은 차가 한다. */
     suspend fun ads(): AdsResponse = call(get("$base/ads"), AdsResponse.serializer())
 
+    /** 광고가 나오기 시작했다·끝까지 나왔다고 알린다(통계용, 로그인 없이). */
+    suspend fun adPlayed(adId: String, event: String) {
+        call(post("$base/ads/$adId/played", AdPlayed(event), AdPlayed.serializer()), AdPlayedOk.serializer())
+    }
+
     // ── 로그인 ──
     suspend fun adProgress(token: String): AdProgress = call(get("$base/ads/progress", token), AdProgress.serializer())
 
@@ -81,15 +86,18 @@ class DjTrotApi(
 
     suspend fun benefits(token: String): BenefitSnapshot = call(get("$base/benefits", token), BenefitSnapshot.serializer())
 
-    suspend fun createSong(token: String, request: CreateSong): DriveSong =
-        call(post("$base/songs", request, CreateSong.serializer(), token), DriveSong.serializer())
+    suspend fun createSong(auth: SongAuth, request: CreateSong): DriveSong =
+        call(post("$base/songs", request, CreateSong.serializer(), auth.token).guest(auth), DriveSong.serializer())
 
-    suspend fun song(token: String, id: String): DriveSong = call(get("$base/songs/$id", token), DriveSong.serializer())
+    suspend fun song(auth: SongAuth, id: String): DriveSong = call(get("$base/songs/$id", auth.token).guest(auth), DriveSong.serializer())
 
-    suspend fun songs(token: String, cursor: String? = null): DriveSongPage {
+    suspend fun songs(auth: SongAuth, cursor: String? = null): DriveSongPage {
         val url = "$base/songs".toHttpUrl().newBuilder().apply { if (cursor != null) addQueryParameter("cursor", cursor) }.build().toString()
-        return call(get(url, token), DriveSongPage.serializer())
+        return call(get(url, auth.token).guest(auth), DriveSongPage.serializer())
     }
+
+    /** 세션이 없으면 시연 손님 ID를 붙인다. */
+    private fun Request.guest(auth: SongAuth): Request = if (auth.token == null && auth.guest != null) newBuilder().header(SongAuth.GUEST_HEADER, auth.guest).build() else this
 
     /** 서버가 준 상대 경로(`/api/v1/dj-trot/dj/voice/…`)를 절대 주소로. 이미 절대면 그대로. */
     fun absolute(path: String): String = origin.resolve(path)?.toString() ?: path
