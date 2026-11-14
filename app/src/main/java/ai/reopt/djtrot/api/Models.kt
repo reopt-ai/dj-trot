@@ -117,6 +117,10 @@ data class DriveInput(
     val moving: Boolean? = null,
     /** PARK · DRIVE · REVERSE · NEUTRAL · UNKNOWN */
     val gear: String? = null,
+    /** rain · fog 만. 맑거나 모르면 보내지 않는다. */
+    val weather: String? = null,
+    /** 지금 길에서 가장 먼저 꺼낼 말 하나(휴게소·터널·정체…). 🔴 서버가 아는 값만 — 다른 값은 400이다. */
+    val scene: String? = null,
 )
 
 @Serializable
@@ -131,7 +135,13 @@ data class DestinationInput(val name: String, val address: String? = null, val r
 data class NowPlaying(val title: String, val artist: String, val songId: String? = null)
 
 @Serializable
-data class BriefRequest(val drive: DriveInput, val voice: Boolean, val nowPlaying: NowPlaying? = null)
+data class BriefRequest(
+    val drive: DriveInput,
+    val voice: Boolean,
+    val nowPlaying: NowPlaying? = null,
+    /** full · short. short면 곡 소개만 받는다. 정하지 않으면 보내지 않는다. */
+    val ment: String? = null,
+)
 
 /** DJ 브리프가 제안하는 신청곡. */
 @Serializable
@@ -143,12 +153,16 @@ data class BriefSong(
     val title: String = "",
 )
 
-/** DJ 브리프 — 멘트와 신청곡 제안. [voiceUrl]이 있으면 서버가 만든 멘트 음성(상대 경로)이다. */
+/**
+ * DJ 브리프 — 멘트와 신청곡 제안. [voiceUrl]이 있으면 서버가 만든 멘트 음성(상대 경로)이다.
+ * 🔑 [voiceClips]가 있으면 그 음성 조각들을 순서대로 이어 튼다([voiceUrl]보다 먼저). 주소가 곧 내용이라 받아 둔 파일을 다시 써도 된다.
+ */
 @Serializable
 data class DjBrief(
     val script: String,
     val song: BriefSong,
     val voiceUrl: String? = null,
+    val voiceClips: List<String> = emptyList(),
     /** ai · template */
     val source: String = "template",
 )
@@ -255,3 +269,11 @@ object Labels {
     fun topic(id: String?): String? = id?.let { key -> config.choices.topic.firstOrNull { it.id == key }?.label }
     fun voice(id: String?): String? = id?.let { key -> config.choices.voice.firstOrNull { it.id == key }?.label }
 }
+
+/** DJ 음성 팩의 조각 하나 — [id]는 조각의 뜻(서버와의 계약), [text]는 화면에 보일 글, [url]은 음성 주소. */
+@Serializable
+data class VoiceClip(val id: String, val text: String, val url: String)
+
+/** 차가 미리 받아 두는 DJ 음성 팩. [version]이 null이면 서버가 팩을 쓰지 않는 중이다. */
+@Serializable
+data class VoicePack(val version: String? = null, val clips: List<VoiceClip> = emptyList())

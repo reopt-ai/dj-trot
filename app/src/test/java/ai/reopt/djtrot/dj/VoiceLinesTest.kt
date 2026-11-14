@@ -1,0 +1,107 @@
+package ai.reopt.djtrot.dj
+
+import ai.reopt.djtrot.car.Arrival
+import ai.reopt.djtrot.car.Departure
+import ai.reopt.djtrot.car.Destination
+import ai.reopt.djtrot.car.DriveContext
+import ai.reopt.djtrot.car.GearState
+import ai.reopt.djtrot.car.PlaceKind
+import ai.reopt.djtrot.car.RoadAhead
+import ai.reopt.djtrot.car.Traffic
+import java.time.LocalTime
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
+import org.junit.Test
+
+/** 🔴 음성 조각 고르기는 서버와 같은 값을 내야 한다 — 기대값은 서버 규칙이 내는 값이다. */
+class VoiceLinesTest {
+    private fun lead(scene: VoiceLines.Scene? = null, weather: String? = null, parked: Boolean = false, minutes: Int? = null, place: String = "place", hour: Int, seed: Long) =
+        VoiceLines.leadIds(scene, weather, parked, hasDestination = minutes != null, remainMinutes = minutes, place = place, hour = hour, seed = seed)
+
+    @Test fun `씨앗은 서버와 같은 값이다`() {
+        assertEquals(3816466114L, VoiceLines.seedOf("고향 가는 길\n마스터트롯 악단"))
+        assertEquals(2639422071L, VoiceLines.seedOf("힘내라 오늘도\n"))
+        assertEquals(350953279L, VoiceLines.seedOf("19"))
+        assertEquals(666016288L, VoiceLines.seedOf("Trot 🎵 노래\nA"))
+        assertEquals(2166136261L, VoiceLines.seedOf(""))
+    }
+
+    @Test fun `DJ 자신의 가수명은 씨앗에서 뺀다`() {
+        assertEquals(2639422071L, VoiceLines.seedOf(SongInfo(" 힘내라 오늘도 ", "DJ 트롯")))
+        assertEquals(3816466114L, VoiceLines.seedOf(SongInfo("고향 가는 길", "마스터트롯 악단")))
+    }
+
+    @Test fun `남은 시간은 가까운 구간으로, 같은 거리면 짧은 쪽`() {
+        assertEquals("5,5,10,20,30,40,60,90,90,120,far", listOf(4, 7, 8, 22, 35, 45, 75, 76, 105, 150, 151).joinToString(",", transform = VoiceLines::etaBucket))
+        assertEquals("near", VoiceLines.etaBucket(3))
+    }
+
+    @Test fun `여는 말과 남은 시간을 서버와 같게 고른다`() {
+        assertEquals(listOf("open.parked.1"), lead(parked = true, hour = 19, seed = 0))
+        assertEquals(listOf("open.rain.1", "eta.home.25"), lead(weather = "rain", minutes = 23, place = "home", hour = 19, seed = 0))
+        assertEquals(listOf("open.morning.2", "eta.place.near"), lead(minutes = 2, hour = 9, seed = 1))
+        assertEquals(listOf("scene.jam.2", "eta.place.40"), lead(scene = VoiceLines.Scene.JAM, weather = "rain", minutes = 41, hour = 9, seed = 1))
+        assertEquals(listOf("scene.charging.1"), lead(scene = VoiceLines.Scene.CHARGING, parked = true, hour = 9, seed = 0))
+        val seed = VoiceLines.seedOf("고향 가는 길\n마스터트롯 악단")
+        assertEquals(listOf("open.rain.2", "eta.place.25"), lead(weather = "rain", minutes = 23, hour = 19, seed = seed))
+        assertEquals(listOf("open.dawn.2", "eta.place.far"), lead(minutes = 200, hour = 3, seed = seed))
+        assertEquals(listOf("open.fog.1"), lead(weather = "fog", hour = 23, seed = 2))
+        assertEquals(listOf("open.night.3"), lead(hour = 23, seed = 2))
+    }
+
+    @Test fun `제목 없는 곡 소개`() {
+        val seed = VoiceLines.seedOf("고향 가는 길\n마스터트롯 악단")
+        assertEquals("play.2", VoiceLines.genericPlayId(SongInfo("고향 가는 길", "마스터트롯 악단"), seed))
+        assertEquals("play.request.fresh", VoiceLines.genericPlayId(SongInfo("a", "DJ 트롯", requested = true, fresh = true), seed))
+        assertEquals("play.request.old", VoiceLines.genericPlayId(SongInfo("a", "DJ 트롯", requested = true), seed))
+    }
+
+    @Test fun `장면은 급한 것부터, 분위기는 곡의 절반에만`() {
+        val busy = DriveContext(ahead = RoadAhead.TUNNEL, traffic = Traffic(12), tripMinutes = 200, cruising = true)
+        assertEquals(VoiceLines.Scene.TUNNEL, VoiceLines.scene(busy, seed = 1, local = false))
+        assertEquals(VoiceLines.Scene.JAM, VoiceLines.scene(busy.copy(ahead = null), seed = 1, local = false))
+        assertEquals(VoiceLines.Scene.ACCIDENT, VoiceLines.scene(DriveContext(traffic = Traffic(2, accident = true)), seed = 1, local = false))
+        assertEquals(VoiceLines.Scene.LONG_DRIVE, VoiceLines.scene(busy.copy(ahead = null, traffic = null), seed = 1, local = false))
+        val calm = DriveContext(gear = GearState.DRIVE, cruising = true)
+        assertEquals(VoiceLines.Scene.CRUISING, VoiceLines.scene(calm, seed = 2, local = false))
+        assertNull(VoiceLines.scene(calm, seed = 3, local = false))
+        assertEquals(VoiceLines.Scene.CHARGING, VoiceLines.scene(DriveContext(gear = GearState.PARK, chargePortOpen = true, company = true), seed = 0, local = true))
+        assertEquals(VoiceLines.Scene.FREE_DRIVE, VoiceLines.scene(DriveContext(gear = GearState.DRIVE, freeDrive = true), seed = 0, local = false))
+        assertNull(VoiceLines.scene(DriveContext(gear = GearState.DRIVE, freeDrive = true, destination = Destination("부산역")), seed = 0, local = false))
+    }
+
+    @Test fun `동승자와 집 회사는 기기 안에서만 쓴다`() {
+        val drive = DriveContext(gear = GearState.DRIVE, company = true, destination = Destination("우리 집", remainMinutes = 23, kind = PlaceKind.HOME))
+        // 🔴 서버로 가는 값에는 동승자 장면도, 목적지의 종류도 없다.
+        val input = drive.toInput(LocalTime.of(19, 0), seed = 0)
+        assertNull(input.scene)
+        assertEquals(VoiceLines.Scene.COMPANY, VoiceLines.scene(drive, seed = 0, local = true))
+        assertEquals(listOf("scene.company.1", "eta.home.25"), VoiceLines.leadIds(drive, hour = 19, seed = 0))
+        assertEquals(listOf("open.evening.2", "eta.home.25"), VoiceLines.leadIds(drive, hour = 19, seed = 1))
+    }
+
+    @Test fun `날씨와 장면을 서버가 아는 값으로 보낸다`() {
+        assertEquals("fog", DriveContext(fog = true, raining = true).toInput(LocalTime.NOON).weather)
+        assertEquals("rain", DriveContext(raining = true).toInput(LocalTime.NOON).weather)
+        assertNull(DriveContext().toInput(LocalTime.NOON).weather)
+        assertEquals("rest_area", DriveContext(ahead = RoadAhead.REST_AREA).toInput(LocalTime.NOON, seed = 1).scene)
+        assertEquals("toll", DriveContext(ahead = RoadAhead.TOLL).toInput(LocalTime.NOON).scene)
+        assertEquals("long_drive", DriveContext(tripMinutes = 130).toInput(LocalTime.NOON, seed = 1).scene)
+        assertNull(DriveContext(gear = GearState.DRIVE, cruising = true).toInput(LocalTime.NOON, seed = 1).scene)
+        // 🔴 서버가 받는 값의 전부다 — 여기에 없는 값을 보내면 400이다.
+        assertEquals(
+            listOf("rest_area", "tunnel", "toll", "jam", "accident", "long_drive", "charging", "company", "cruising", "free_drive"),
+            VoiceLines.Scene.entries.map { it.id },
+        )
+    }
+
+    @Test fun `출발과 도착 조각은 기기 멘트와 같은 기준이다`() {
+        assertEquals("depart.place.plain", VoiceLines.departureId(Departure("부산역")))
+        assertEquals("depart.home.plain", VoiceLines.departureId(Departure("우리 집", kind = PlaceKind.HOME, minutes = 0)))
+        assertEquals("depart.home.short", VoiceLines.departureId(Departure("우리 집", minutes = 14, kind = PlaceKind.HOME)))
+        assertEquals("depart.office.long", VoiceLines.departureId(Departure("회사", minutes = 15, kind = PlaceKind.OFFICE)))
+        assertEquals("arrive.short", VoiceLines.arrivalId(Arrival("부산역", minutes = 9)))
+        assertEquals("arrive.long", VoiceLines.arrivalId(Arrival("부산역", minutes = 40)))
+        assertEquals("arrive.long", VoiceLines.arrivalId(Arrival("부산역")))
+    }
+}

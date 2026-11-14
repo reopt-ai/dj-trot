@@ -1,5 +1,6 @@
 package ai.reopt.djtrot.api
 
+import java.io.File
 import java.io.IOException
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.Dispatchers
@@ -39,8 +40,22 @@ class DjTrotApi(
 
     suspend fun catalogSong(id: String): TrotSong = call(get("$base/catalog/songs/$id"), TrotSong.serializer())
 
-    suspend fun brief(drive: DriveInput, voice: Boolean, nowPlaying: NowPlaying? = null): DjBrief =
-        call(post("$base/dj/brief", BriefRequest(drive, voice, nowPlaying), BriefRequest.serializer()), DjBrief.serializer(), briefClient)
+    /**
+     * 🔑 [token]은 이미 가진 세션이 있을 때만 붙인다 — 서버가 주인을 확인하면 신청곡을 제목으로 소개한다. 없어도 브리프는 온다.
+     */
+    suspend fun brief(drive: DriveInput, voice: Boolean, nowPlaying: NowPlaying? = null, ment: String? = null, token: String? = null): DjBrief =
+        call(post("$base/dj/brief", BriefRequest(drive, voice, nowPlaying, ment), BriefRequest.serializer(), token), DjBrief.serializer(), briefClient)
+
+    /** 미리 받아 두는 DJ 음성 팩의 목록. */
+    suspend fun voicePack(): VoicePack = call(get("$base/dj/voice-pack"), VoicePack.serializer())
+
+    /** 음성 조각 하나를 [into]에 내려받는다. 실패하면 던진다. */
+    suspend fun download(url: String, into: File): Unit = withContext(Dispatchers.IO) {
+        client.newCall(Request.Builder().url(absolute(url)).build()).execute().use { response ->
+            if (!response.isSuccessful) throw DjTrotApiException(response.code, "", "HTTP ${response.code}")
+            into.outputStream().use { out -> response.body.byteStream().copyTo(out) }
+        }
+    }
 
     suspend fun startPairing(deviceName: String): PairingStarted =
         call(post("$base/pairings", PairingStart(deviceName), PairingStart.serializer()), PairingStarted.serializer())

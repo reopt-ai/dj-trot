@@ -26,8 +26,14 @@ class DeviceAccount(
     private val vault: DeviceVault,
 ) {
     private val lock = Mutex()
-    private var token: String? = null
-    private var expiresAt: Instant = Instant.EPOCH
+    @Volatile private var token: String? = null
+    @Volatile private var expiresAt: Instant = Instant.EPOCH
+
+    /**
+     * 지금 메모리에 있는 유효한 토큰. 없거나 곧 만료면 null — 새로 받으러 가지 않는다.
+     * 🔑 곡이 시작될 때 부르는 DJ 브리프처럼 기다릴 수 없는 호출에 쓴다.
+     */
+    fun cachedToken(): String? = token?.takeIf { Instant.now().isBefore(expiresAt.minusSeconds(60)) }
 
     private val _connection = MutableStateFlow<Connection>(if (vault.read() != null) Connection.Connected(null) else Connection.Disconnected)
     val connection: StateFlow<Connection> = _connection.asStateFlow()

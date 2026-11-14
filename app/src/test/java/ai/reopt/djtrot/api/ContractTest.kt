@@ -41,6 +41,31 @@ class ContractTest {
         assertEquals("mother", brief.song.topic)
     }
 
+    @Test fun `음성 조각을 주는 DJ 브리프와 음성 팩을 읽는다`() {
+        val brief = json.decodeFromString(
+            DjBrief.serializer(),
+            """{"script":"아아... 비가, 오네요... '고향역', 띄워 드립니다.","song":{"topic":"life","style":"dance","voice":"female","story":"저녁길","title":"저녁길"},
+               "voiceUrl":null,"voiceClips":["/api/v1/dj-trot/dj/voice/a","/api/v1/dj-trot/dj/voice/b"],"source":"template"}""",
+        )
+        assertEquals(2, brief.voiceClips.size)
+        val pack = json.decodeFromString(VoicePack.serializer(), """{"version":"abc","clips":[{"id":"open.rain.1","text":"아아... 비가, 오네요...","url":"/api/v1/dj-trot/dj/voice/a"}],"later":1}""")
+        assertEquals("open.rain.1", pack.clips.single().id)
+        assertNull(json.decodeFromString(VoicePack.serializer(), """{"version":null,"clips":[]}""").version)
+    }
+
+    @Test fun `멘트 길이와 날씨는 정해졌을 때만 보낸다`() {
+        val plain = json.encodeToString(BriefRequest.serializer(), BriefRequest(DriveContext().toInput(LocalTime.NOON), voice = false))
+        assertFalse("ment" in plain)
+        assertFalse("weather" in plain)
+        assertFalse("scene" in plain)
+        // 🔴 즐겨찾기의 집·회사는 서버로 가지 않는다.
+        assertFalse("kind" in plain)
+        val rainy = json.encodeToString(BriefRequest.serializer(), BriefRequest(DriveContext(raining = true, ahead = ai.reopt.djtrot.car.RoadAhead.TUNNEL).toInput(LocalTime.NOON), voice = true, ment = "short"))
+        assertTrue("\"ment\":\"short\"" in rainy)
+        assertTrue("\"weather\":\"rain\"" in rainy)
+        assertTrue("\"scene\":\"tunnel\"" in rainy)
+    }
+
     @Test fun `주행 정보는 계약된 키와 길이만 보낸다`() {
         val drive = DriveContext(
             drivingMode = "COMFORT",

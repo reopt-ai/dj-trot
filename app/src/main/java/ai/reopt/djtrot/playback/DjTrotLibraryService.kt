@@ -5,12 +5,14 @@ import ai.reopt.djtrot.api.NowPlaying
 import ai.reopt.djtrot.dj.DjScript
 import ai.reopt.djtrot.dj.SongInfo
 import ai.reopt.djtrot.dj.SongRequest
+import ai.reopt.djtrot.dj.VoiceLines
 import ai.reopt.djtrot.dj.toInput
 import ai.reopt.djtrot.ui.MainActivity
 import android.app.PendingIntent
 import android.content.Intent
 import android.util.Log
 import androidx.annotation.OptIn
+import androidx.core.net.toUri
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
@@ -23,6 +25,7 @@ import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.ResolvingDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.exoplayer.source.SilenceMediaSource
 import androidx.media3.session.LibraryResult
 import androidx.media3.session.MediaLibraryService
 import androidx.media3.session.MediaSession
@@ -64,6 +67,8 @@ class DjTrotLibraryService : MediaLibraryService() {
     private val catalog get() = app.catalog
 
     private var announced: String? = null
+    /** 이번 재생 목록에서 DJ가 소개한 곡 수 — 첫 곡과 그 뒤 [FULL_EVERY]곡마다만 길게 말한다. */
+    private var introduced = 0
     private var briefJob: Job? = null
     /** 서버가 만든 DJ 멘트 음성을 트는 작은 플레이어. 오디오 포커스는 본 플레이어가 쥐고, 말하는 동안 음악을 줄인다. */
     private var clip: ExoPlayer? = null
@@ -110,26 +115,20 @@ class DjTrotLibraryService : MediaLibraryService() {
         scope.launch {
             app.car.arrivals.collect { arrival ->
                 if (!app.djTalks || !player.isPlaying) return@collect
-                val line = DjScript.arrival(arrival)
-                app.dj.update { it.say(line) }
-                launch { talk(line) }
+                launch { moment(VoiceLines.arrivalId(arrival), DjScript.arrival(arrival)) }
             }
         }
         // 길 안내를 시작하면 이번 길을 여는 말을, 경유지에 닿으면 짧은 인사를 한다.
         scope.launch {
             app.car.departures.collect { departure ->
                 if (!app.djTalks || !player.isPlaying) return@collect
-                val line = DjScript.departure(departure)
-                app.dj.update { it.say(line) }
-                launch { talk(line) }
+                launch { moment(VoiceLines.departureId(departure), DjScript.departure(departure)) }
             }
         }
         scope.launch {
             app.car.waypoints.collect { arrival ->
                 if (!app.djTalks || !player.isPlaying) return@collect
-                val line = DjScript.waypoint(arrival)
-                app.dj.update { it.say(line) }
-                launch { talk(line) }
+                launch { moment(VoiceLines.WAYPOINT_ID, DjScript.waypoint(arrival)) }
             }
         }
         // 🔑 말로 사연을 듣는 동안은 DJ가 입을 닫고 음악도 줄인다 — 마이크에 노래가 섞이지 않게.
@@ -164,9 +163,12 @@ class DjTrotLibraryService : MediaLibraryService() {
 
     /**
      * 곡이 실제로 울리기 시작할 때 한 번 DJ가 소개한다.
-     * 🔑 멘트는 서버 DJ 브리프(AI)로 쓰고, 받지 못하면(8초·오프라인) 기기 템플릿으로 읽는다.
-     *    서버 음성(voiceUrl)은 멘트가 이 곡을 말할 때만 튼다 — 곡 소개를 기기 TTS로 덧붙이면 두 목소리가 섞인다.
+     * 🔑 멘트는 서버 DJ 브리프로 받는다. 브리프가 음성 조각(voiceClips)을 주면 순서대로 이어 틀고, 받아 둔 조각은 파일로 튼다.
+     *    받지 못하면(8초·오프라인) 받아 둔 음성 팩에서 같은 규칙으로 조각을 고르고, 팩도 없으면 기기 템플릿을 TTS로 읽는다.
+     *    통문장 음성(voiceUrl)은 멘트가 이 곡을 말할 때만 튼다 — 곡 소개를 기기 TTS로 덧붙이면 두 목소리가 섞인다.
      *    음성은 전주 위에 음악을 줄이고 얹는다(라디오 진행처럼). 곡을 미리 멈추면 시작이 늦어진다.
+     * 🔑 길게 말하는 것은 첫 곡과 그 뒤 [FULL_EVERY]곡마다다. 나머지와 어린이보호구역에서는 곡 소개만 한다.
+     * 🔑 여는 말을 받아 둔 조각으로 낼 수 있으면 서버에는 곡 소개만 청한다 — 집·회사·동승자처럼 차만 아는 것으로 고른 말을 쓰려는 것이다.
      */
     private fun announce(item: MediaItem?) {
         if (item == null || !app.djTalks) return
@@ -183,9 +185,17 @@ class DjTrotLibraryService : MediaLibraryService() {
         val drive = app.car.state.value
         val now = LocalTime.now()
         val seed = item.mediaId.hashCode()
+        val full = introduced % FULL_EVERY == 0 && !drive.schoolZone
+        introduced += 1
+        app.syncVoicePack()
+        val pick = VoiceLines.seedOf(song)
+        // 받아 둔 조각으로 낼 여는 말. 하나라도 빠졌으면 서버가 고른 것을 쓴다.
+        val lead = if (full) VoiceLines.leadIds(drive, now.hour, pick).map(app.voicePack::fragment) else emptyList()
+        val ownLead = lead.isNotEmpty() && lead.all { it != null }
         briefJob?.cancel()
         briefJob = scope.launch {
-            val brief = runCatching { app.api.brief(drive.toInput(now, app.spoken), voice = true, nowPlaying = nowPlaying) }
+            val ment = if (full && !ownLead) "full" else "short"
+            val brief = runCatching { app.api.brief(drive.toInput(now, app.spoken, pick), voice = true, nowPlaying = nowPlaying, ment = ment, token = app.account.cachedToken()) }
                 .onFailure { Log.i(TAG, "DJ 브리프 대신 기기 멘트: ${it.message}") }
                 .getOrNull()
             if (player.currentMediaItem?.mediaId != item.mediaId) return@launch
@@ -194,17 +204,34 @@ class DjTrotLibraryService : MediaLibraryService() {
                 announced = null
                 return@launch
             }
+            val mine = lead.filterNotNull().takeIf { ownLead }.orEmpty()
             if (brief == null) {
+                // 서버가 닿지 않는다 — 받아 둔 조각이 있으면 같은 목소리로, 없으면 기기 템플릿으로.
+                val play = app.voicePack.fragment(VoiceLines.genericPlayId(song, pick))
+                if (play != null) {
+                    val parts = mine + play
+                    val line = parts.joinToString(" ") { it.text }
+                    app.dj.update { it.say(line, now).copy(problem = null) }
+                    talk(line, item.mediaId, clips = parts.map { it.file.toUri().toString() })
+                    return@launch
+                }
                 val line = DjScript.intro(song, drive, now, seed)
                 app.dj.update { it.say(line, now).copy(problem = null) }
                 talk(line, item.mediaId)
+                return@launch
+            }
+            if (brief.voiceClips.isNotEmpty()) {
+                val line = (mine.map { it.text } + brief.script).joinToString(" ")
+                app.dj.update { it.say(line, now).copy(problem = null).suggest(SongRequest.of(brief.song)) }
+                val clips = mine.map { it.file.toUri().toString() } + brief.voiceClips.map { url -> app.voicePack.local(url)?.toUri()?.toString() ?: app.api.absolute(url) }
+                talk(line, item.mediaId, clips = clips)
                 return@launch
             }
             val mentions = song.title.isNotBlank() && song.title.trim() in brief.script
             val line = if (mentions) brief.script else "${brief.script} ${DjScript.play(song, seed)}"
             app.dj.update { it.say(line, now).copy(problem = null).suggest(SongRequest.of(brief.song)) }
             val voiceUrl = brief.voiceUrl
-            talk(line, item.mediaId, clipUrl = voiceUrl?.takeIf { mentions }?.let(app.api::absolute))
+            talk(line, item.mediaId, clips = listOfNotNull(voiceUrl?.takeIf { mentions }?.let(app.api::absolute)))
         }
     }
 
@@ -215,7 +242,7 @@ class DjTrotLibraryService : MediaLibraryService() {
      *    기다리는 사이 곡이 바뀌었거나 멈췄으면 읽지 않는다.
      * 🔑 기기 TTS는 음악을 먼저 줄이고 [LEAD_IN_MS] 뒤에 말한다(라디오 진행처럼, Pleos 음성 앞 여백 권장).
      */
-    private suspend fun talk(line: String, itemId: String? = null, clipUrl: String? = null) {
+    private suspend fun talk(line: String, itemId: String? = null, clips: List<String> = emptyList()) {
         val quiet = withTimeoutOrNull(HOLD_MAX_MS) {
             while (app.car.state.value.holdTalk || app.mic.state.value.listening) {
                 app.car.state.first { !it.holdTalk }
@@ -224,7 +251,7 @@ class DjTrotLibraryService : MediaLibraryService() {
             }
         }
         if (quiet == null || !stillOn(itemId)) return
-        if (clipUrl != null) return playClip(clipUrl)
+        if (clips.isNotEmpty()) return playClips(clips)
         leadIn = true
         duck()
         try {
@@ -283,8 +310,19 @@ class DjTrotLibraryService : MediaLibraryService() {
         return NowPlaying(title?.toString().orEmpty(), artist?.toString().orEmpty(), made?.getString(Catalog.EXTRA_SONG_ID))
     }
 
-    /** 서버 멘트 음성 — 음악을 줄이고 얹었다가 끝나면 되돌린다. */
-    private fun playClip(url: String) {
+    /**
+     * 출발·도착·경유 인사 — 받아 둔 음성 조각이 있으면 그 목소리로, 없으면 기기 템플릿을 TTS로 읽는다.
+     * 화면에는 실제로 말하는 글을 보인다.
+     */
+    private suspend fun moment(fragmentId: String, fallback: String) {
+        val fragment = app.voicePack.fragment(fragmentId)
+        val line = fragment?.text ?: fallback
+        app.dj.update { it.say(line) }
+        talk(line, clips = listOfNotNull(fragment?.file?.toUri()?.toString()))
+    }
+
+    /** 멘트 음성(조각 여럿이면 순서대로 이어서) — 음악을 줄이고 얹었다가 다 끝나면 되돌린다. 틀지 못하면 기기 TTS가 같은 글을 읽는다. */
+    private fun playClips(urls: List<String>) {
         val voice = clip ?: ExoPlayer.Builder(this)
             .setMediaSourceFactory(DefaultMediaSourceFactory(authorizedSource()))
             .setAudioAttributes(AudioAttributes.Builder().setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_SPEECH).build(), false)
@@ -307,7 +345,11 @@ class DjTrotLibraryService : MediaLibraryService() {
             }
         clipOn = true
         duck()
-        voice.setMediaItem(MediaItem.fromUri(url))
+        // 🔑 조각은 끝의 쉼이 짧다(실측 중앙값 0.15초) — 그대로 이으면 문장이 붙어 들린다. 조각 사이에 [CLIP_GAP_US]만큼 숨을 넣는다.
+        val sources = DefaultMediaSourceFactory(authorizedSource())
+        voice.setMediaSources(urls.flatMapIndexed { index, url ->
+            listOfNotNull(if (index > 0) SilenceMediaSource(CLIP_GAP_US) else null, sources.createMediaSource(MediaItem.fromUri(url)))
+        })
         voice.prepare()
         voice.play()
     }
@@ -435,6 +477,7 @@ class DjTrotLibraryService : MediaLibraryService() {
             unplayable.clear()
             failuresInRow = 0
             announced = null
+            introduced = 0
             val single = mediaItems.singleOrNull()
             val query = single?.requestMetadata?.searchQuery
             when {
@@ -487,6 +530,9 @@ class DjTrotLibraryService : MediaLibraryService() {
 
     private companion object {
         const val TAG = "DjTrotPlayback"
+        /** 멘트 조각 사이의 숨(마이크로초). */
+        const val CLIP_GAP_US = 350_000L
+
         /** DJ가 말하는 동안 음악 크기. */
         const val DUCKED = 0.3f
         const val FADE_MS = 300L
@@ -500,6 +546,8 @@ class DjTrotLibraryService : MediaLibraryService() {
         /** 내비 안내·차선 변경이 끝나기를 기다리는 가장 긴 시간. 넘으면 멘트는 화면에만 둔다. */
         const val HOLD_MAX_MS = 15_000L
         const val MAX_FAILURES_IN_ROW = 3
+        /** DJ가 길게 말하는 간격(곡 수). 사이의 곡은 곡 소개만 한다. */
+        const val FULL_EVERY = 3
     }
 }
 

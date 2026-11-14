@@ -36,7 +36,7 @@ flowchart TB
 | `api/` | 서버 클라이언트(`DjTrotApi`)와 주고받는 모델(`Models.kt`) |
 | `account/` | 휴대폰 페어링으로 받은 기기 자격 보관(`DeviceVault`)과 1시간 세션(`DeviceAccount`) |
 | `car/` | 차량 신호를 모아 `DriveContext` 하나로(`CarSignals`, `AaosCar`) |
-| `dj/` | 멘트 템플릿(`DjScript`), 기기에서 짓는 사연(`StoryBuilder`), 목소리(`DjVoice`), 노래 주문(`SongOrders`) |
+| `dj/` | 멘트 템플릿(`DjScript`), 음성 조각 고르기(`VoiceLines`)와 받아 둔 음성 팩(`VoicePackStore`), 기기에서 짓는 사연(`StoryBuilder`), 목소리(`DjVoice`), 노래 주문(`SongOrders`) |
 | `playback/` | 재생 서비스(`DjTrotLibraryService`), 브라우즈 트리의 모양(`MediaPath`, `Shelf`), 목록·검색·큐(`Catalog`) |
 | `ui/` | 화면. 무대(`DjScreen`), 목록과 신청곡(`Shelf`), 휴대폰 연결(`ConnectActivity`), 공통 부품과 테마 |
 
@@ -58,24 +58,40 @@ flowchart TB
 sequenceDiagram
     participant Player as ExoPlayer
     participant Service as DjTrotLibraryService
+    participant Pack as VoicePackStore
     participant Server as DJ 트롯 서버
     participant Voice as DjVoice
     participant State as DjState
 
     Player->>Service: 재생 시작, 곡 전환
-    Service->>Server: DJ 브리프 (8초 제한)
-    alt 받음
-        Server-->>Service: 멘트, 음성 주소, 신청곡 제안
+    Service->>Pack: 여는 말 조각이 받아져 있나
+    Service->>Server: DJ 브리프 (8초 제한, 여는 말이 있으면 곡 소개만)
+    alt 음성 조각을 받음
+        Server-->>Service: 멘트, 음성 조각 주소, 신청곡 제안
         Service->>State: 멘트와 제안
-        Service->>Player: 음악을 줄이고 서버 음성을 얹음 (멘트가 곡 제목을 말할 때만)
+        Service->>Player: 음악을 줄이고 조각을 순서대로 얹음 (받아 둔 조각은 파일로)
+    else 통문장 음성을 받음
+        Server-->>Service: 멘트, 음성 주소, 신청곡 제안
+        Service->>Player: 음악을 줄이고 음성을 얹음 (멘트가 곡 제목을 말할 때만)
     else 늦음, 오프라인
-        Service->>State: DjScript 멘트
-        Service->>Voice: 기기 TTS로 읽기
+        Service->>Pack: 같은 규칙으로 조각 고르기
+        alt 받아 둔 조각이 있음
+            Service->>Player: 음악을 줄이고 조각을 얹음
+        else 없음
+            Service->>State: DjScript 멘트
+            Service->>Voice: 기기 TTS로 읽기
+        end
     end
 ```
 
 - 멘트는 곡이 실제로 울리기 시작할 때 한 번만 냅니다. 오래 멈췄다 같은 곡을 이어 틀면 신청곡 제안만 새로 받습니다.
-- 서버 음성이 곡 제목을 말하지 않으면 기기 TTS로 읽습니다. 두 목소리가 섞이지 않게 하려는 것입니다.
+- DJ의 말은 조각으로 이어 붙습니다. 여는 말(시간대, 날씨, 길 위의 장면), 남은 시간, 곡 소개 순서입니다. 조각 ID와 고르는 규칙은 서버와의 계약이고 `dj/VoiceLines`에 있습니다. 같은 곡은 같은 조각이 나옵니다.
+- 길게 말하는 것은 재생 목록의 첫 곡과 그 뒤 세 곡마다입니다. 사이의 곡과 어린이보호구역에서는 곡 소개만 합니다.
+- `dj/VoicePackStore`가 앱을 켤 때와 곡을 소개할 때 서버의 음성 팩 목록을 확인해(다 받았으면 한 시간에 한 번) 조각을 앱 내부 저장소에 받아 둡니다. 받아 둔 조각이 있으면 서버가 닿지 않아도, 출발·도착·경유 인사도 같은 DJ 목소리로 말합니다. 받는 중에 끊긴 조각은 쓰지 않고 다음에 이어 받습니다.
+- 여는 말을 받아 둔 조각으로 낼 수 있으면 서버에는 곡 소개만 청합니다. 즐겨찾기의 집·회사나 동승자처럼 차만 아는 것으로 고른 말("집까지…", "함께 타신 분…")을 쓰려는 것입니다. 이 값들은 서버로 가지 않습니다.
+- 서버에는 날씨(비, 안개)와 길 위의 장면 하나(휴게소, 터널, 톨게이트, 정체, 사고, 오래 달림, 충전, 크루즈, 발길 닿는 대로)를 보냅니다. 분위기 장면(충전, 크루즈, 발길 닿는 대로)은 곡의 절반에만 보내 같은 말이 이어지지 않게 합니다.
+- 연결된 계정이면 브리프에 이미 가진 세션 토큰을 붙입니다. 서버가 주인을 확인한 신청곡만 제목으로 소개합니다. 토큰을 새로 받느라 멘트를 늦추지는 않습니다.
+- 통문장 음성이 곡 제목을 말하지 않으면 기기 TTS로 읽습니다. 두 목소리가 섞이지 않게 하려는 것입니다. 조각을 틀지 못하면 같은 글을 기기 TTS가 읽습니다.
 - 음원을 받지 못한 곡은 건너뛰고, 세 곡 연속 실패하면 멈추고 화면에 알립니다.
 
 ## 노래 주문

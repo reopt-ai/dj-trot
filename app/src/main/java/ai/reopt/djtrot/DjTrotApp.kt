@@ -17,6 +17,8 @@ import android.app.Application
 import androidx.core.content.edit
 import java.time.Duration
 import java.time.Instant
+import ai.reopt.djtrot.dj.VoicePackStore
+import java.io.File
 import java.time.LocalTime
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -82,6 +84,8 @@ class DjTrotApp : Application() {
     val orders by lazy { SongOrders(api, account, catalog, scope) }
     val car by lazy { CarSignals(this) }
     val voice: DjVoice by lazy { FallbackDjVoice(this) }
+    /** 받아 둔 DJ 음성 조각 — 서버가 닿지 않을 때와 출발·도착 인사에 쓴다. */
+    val voicePack by lazy { VoicePackStore(File(filesDir, "voice-pack"), api::voicePack, api::download) }
     val dj = MutableStateFlow(DjState())
     val mic by lazy { StoryMic(this, ::wish) }
 
@@ -100,8 +104,14 @@ class DjTrotApp : Application() {
         }
     }
 
+    /** DJ 음성 팩을 뒤에서 받아 둔다. 다 받은 지 얼마 안 됐으면 아무것도 하지 않고, 실패하면 다음에 잇는다. */
+    fun syncVoicePack() {
+        scope.launch { runCatching { voicePack.sync() } }
+    }
+
     override fun onCreate() {
         super.onCreate()
+        syncVoicePack()
         // 선택지 이름을 서버 표로. 연결된 계정이면 같은 호출이 첫 선물 토큰을 넣는다(서버가 계정당 한 번만).
         scope.launch {
             account.connection.collect { connection ->
