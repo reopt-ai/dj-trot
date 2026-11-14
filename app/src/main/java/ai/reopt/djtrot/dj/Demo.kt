@@ -110,6 +110,8 @@ data class DemoStep(
     val change: (DemoDrive) -> DemoDrive,
     val speak: Boolean = true,
     val event: ((DemoDrive) -> DemoEvent)? = null,
+    /** 참이면 상황 대신 광고를 지금 튼다(자동 시연 전용) — 관리자에 등록한 광고의 장소에 다가간 것으로 꾸민다. */
+    val ad: Boolean = false,
 )
 
 /** [columns] — 한 줄에 놓을 버튼 수. null이면 화면이 정한다. */
@@ -196,19 +198,28 @@ object Demo {
 
     val STEPS: List<DemoStep> = GROUPS.flatMap { it.steps }
 
+    /**
+     * 자동 시연의 광고 차례 — 버튼 묶음에는 없다(광고는 시뮬레이션의 광고 칸에서 고른다).
+     * 🔑 지금 곡을 넘기고 광고를 바로 튼다: DJ의 "이 근처 소식" → 광고 음악 → 끝까지 들으면 생성권 진행 한마디.
+     */
+    val AD_STEP = DemoStep("ad", "광고", "근처 가게 광고를 지금 틀어요", change = { it }, speak = false, ad = true)
+
     private fun scenario(id: String, title: String, description: String, vararg steps: String) =
-        DemoScenario(id, title, description, steps.map { step -> STEPS.first { it.id == step } })
+        DemoScenario(id, title, description, steps.map { step -> (STEPS + AD_STEP).first { it.id == step } })
 
     /** 자동 시연 — 버튼을 차례로 눌러 주는 정해 둔 길. 발표 중에 손을 떼거나 전시장에서 혼자 돌릴 때 쓴다. */
     val SCENARIOS: List<DemoScenario> = listOf(
-        scenario("trip", "강릉 가는 먼 길", "출발 · 크루즈 · 터널 · 정체 · 휴게소 · 도착", "depart.far", "cruise", "tunnel", "jam", "rest", "waypoint", "long", "arrive"),
-        scenario("home", "비 오는 퇴근길", "저녁 · 출발 · 비 · 동승자 · 사고 · 어린이보호구역 · 도착", "hour.evening", "depart.home", "rain", "company", "accident", "school", "arrive"),
-        scenario("wander", "발길 닿는 대로", "새벽 · 목적지 없이 · 안개 · 방향지시등 · 충전", "hour.dawn", "free", "fog", "signal", "signal", "charge"),
+        scenario("trip", "강릉 가는 먼 길", "출발 · 크루즈 · 터널 · 광고 · 정체 · 휴게소 · 도착", "depart.far", "cruise", "tunnel", "ad", "jam", "rest", "waypoint", "long", "arrive"),
+        scenario("home", "비 오는 퇴근길", "저녁 · 출발 · 비 · 동승자 · 광고 · 사고 · 어린이보호구역 · 도착", "hour.evening", "depart.home", "rain", "company", "ad", "accident", "school", "arrive"),
+        scenario("wander", "발길 닿는 대로", "새벽 · 목적지 없이 · 안개 · 광고 · 방향지시등 · 충전", "hour.dawn", "free", "fog", "ad", "signal", "signal", "charge"),
     )
 }
 
 /** 자동 시연의 한 길 — 버튼([steps])을 차례로 누른다. */
 data class DemoScenario(val id: String, val title: String, val description: String, val steps: List<DemoStep>)
+
+/** 광고 차례에서 기다리는 시간(초) — DJ 소개 + 광고 길이(0이면 1분으로 본다) + 끝난 뒤 진행 한마디. */
+fun adPauseSeconds(maxSeconds: Int): Int = (maxSeconds.takeIf { it > 0 } ?: 60) + 20
 
 /** 자동 시연이 버튼 하나를 누른 뒤 다음 버튼까지 기다리는 시간(초) — DJ가 말을 마칠 만큼. */
 val DemoStep.pauseSeconds: Int

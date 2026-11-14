@@ -94,6 +94,17 @@ class DemoTest {
         assertEquals(19, home.hour)
     }
 
+    @Test fun `자동 시연의 길마다 광고 차례가 한 번 있고 상황은 바꾸지 않는다`() {
+        Demo.SCENARIOS.forEach { scenario -> assertEquals(scenario.id, 1, scenario.steps.count { it.ad }) }
+        assertTrue(Demo.SCENARIOS.all { it.description.contains("광고") })
+        assertTrue(Demo.STEPS.none { it.ad })
+        val drive = press("depart.home", "rain")
+        assertEquals(drive, Demo.AD_STEP.change(drive))
+        // DJ 소개 + 광고 길이 + 진행 한마디만큼 기다린다. 곡 끝까지 트는 광고는 1분으로 본다.
+        assertEquals(60, adPauseSeconds(40))
+        assertEquals(80, adPauseSeconds(0))
+    }
+
     @Test fun `지금 상황을 한 줄로 보여 준다`() {
         assertEquals("주행 · 우리 집까지 35분 · 비", press("depart.home", "rain").summary())
         assertEquals("충전 중", press("charge").summary())
