@@ -11,6 +11,9 @@ enum class GearState(val label: String) {
 /** 내비 즐겨찾기가 알려 주는 곳의 종류. DJ가 "집으로 가는 길"이라고 부를 수 있다. */
 enum class PlaceKind { HOME, OFFICE }
 
+/** 좌표. 🔴 차 안에서 광고 장소를 견줄 때만 쓰고 서버로 보내지 않는다. */
+data class GeoPoint(val latitude: Double, val longitude: Double)
+
 data class Destination(
     val name: String,
     val address: String? = null,
@@ -20,6 +23,8 @@ data class Destination(
     val remainKm: Double? = null,
     /** 즐겨찾기의 집·회사와 같은 곳이면 그 종류. */
     val kind: PlaceKind? = null,
+    /** 목적지 좌표. 🔴 기기 안에서만 쓴다. */
+    val location: GeoPoint? = null,
 )
 
 /**
@@ -83,6 +88,8 @@ data class DriveContext(
     /** NORMAL·ECO·SPORT */
     val drivingMode: String? = null,
     val currentAddress: String? = null,
+    /** 지금 좌표(내비). 🔴 광고 장소를 차 안에서 견줄 때만 쓰고, 서버로 보내지도 저장하지도 않는다. */
+    val location: GeoPoint? = null,
     val destination: Destination? = null,
     val batteryPercent: Int? = null,
     /** 🔑 CarUxRestrictions가 주행 최적화(DO)를 요구하는 중. 화면은 이 값으로 스스로 제한한다. */

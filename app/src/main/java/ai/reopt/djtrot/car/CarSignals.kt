@@ -169,8 +169,11 @@ class CarSignals(context: Context) {
 
     private val naviListener = object : NaviHelperEventListener {
         override fun onCurrentLocationInfo(currentLocationInfo: CurrentLocationInfo) {
-            val address = currentLocationInfo.address.takeIf { it.isNotBlank() } ?: return
-            _state.update { it.copy(currentAddress = address) }
+            // 🔑 좌표는 광고 장소를 기기 안에서 견주는 데만 쓴다 — 서버로 가는 맥락(toInput)에는 들어가지 않는다.
+            val location = point(currentLocationInfo.latitude, currentLocationInfo.longitude)
+            val address = currentLocationInfo.address.takeIf { it.isNotBlank() }
+            if (address == null && location == null) return
+            _state.update { it.copy(currentAddress = address ?: it.currentAddress, location = location ?: it.location) }
         }
         override fun onDestinationInfo(destinationInfo: DestinationInfo) = _state.update { it.copy(destination = destinationInfo.toDestination(bookmarks)) }
         override fun onRouteStarted(routeStartInfo: RouteStartInfo) {
@@ -350,6 +353,10 @@ class CarSignals(context: Context) {
 }
 
 /** 🔑 내비의 남은 시간은 초, 남은 거리는 미터로 온다(에뮬레이터 경로 안내로 확인). 0 이하는 값이 없는 것으로 본다. */
+/** 내비가 준 좌표 — 값이 없을 때 오는 (0, 0)은 버린다. */
+internal fun point(latitude: Double, longitude: Double): GeoPoint? =
+    if (latitude == 0.0 && longitude == 0.0) null else GeoPoint(latitude, longitude)
+
 internal fun DestinationInfo.toDestination(bookmarks: List<Bookmark> = emptyList()): Destination? {
     val label = name.ifBlank { address }
     if (label.isBlank()) return null
@@ -359,6 +366,7 @@ internal fun DestinationInfo.toDestination(bookmarks: List<Bookmark> = emptyList
         remainMinutes = remainTime.takeIf { it > 0 }?.let { (it + 59) / 60 },
         remainKm = remainDistance.takeIf { it > 0 }?.let { it / 1000.0 },
         kind = bookmarks.firstOrNull { it.matches(poiId, name, address) }?.kind,
+        location = point(latitude, longitude),
     )
 }
 
