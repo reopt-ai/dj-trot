@@ -5,4 +5,10 @@
         <item name="android:statusBarColor">@color/dj_background</item>
         <item name="android:navigationBarColor">@color/dj_background</item>
     </style>
+
+    <!-- 🔑 차량 화면(MainActivity) — 창 바탕을 비워 앱 화면의 둥근 모서리 밖으로 시스템 바탕이 보이게 한다. 검정 사각형이 밝은 Pleos 화면 위에서 각져 보이지 않게. -->
+    <style name="Theme.DjTrot.Stage">
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+    </style>
 </resources>

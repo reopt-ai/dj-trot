@@ -98,10 +98,14 @@ private val DesignHeight = 1210.dp
  *    — 2열을 그대로 줄이면 글자를 읽을 수 없다(Pleos App Structure: 세로는 핵심 기능, 가로는 추가 정보).
  * 🔑 각 배치의 기준 창 크기로 그리고, 창이 그보다 작거나 크면 같은 비율로 맞춘다(글자·간격 모두).
  * 🔑 주행 중(CarUxRestrictions)에는 목록·사연 본문을 숨기고, 재생 조작과 짧은 안내만 남긴다.
+/** 앱 화면 전체의 모서리 — 안쪽 무대 카드(36dp)보다 살짝 작게 둥글린다. */
+private val WindowCorner = 32.dp
+
  */
 @Composable
 fun DjScreen(app: DjTrotApp, player: Player?) {
-    BoxWithConstraints(Modifier.fillMaxSize().background(DjColors.Black)) {
+    // 🔑 앱 화면 전체의 모서리를 둥글린다 — 창 바탕이 비어 있어(Theme.DjTrot.Stage) 모서리 밖으로 시스템 바탕이 보인다.
+    BoxWithConstraints(Modifier.fillMaxSize().clip(RoundedCornerShape(WindowCorner)).background(DjColors.Black)) {
         val compact = maxWidth < maxHeight || maxWidth < 1200.dp
         val scale = minOf(maxWidth / (if (compact) CompactWidth else WideWidth), maxHeight / DesignHeight).coerceIn(0.6f, 1.25f)
         val density = LocalDensity.current

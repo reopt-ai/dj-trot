@@ -56,6 +56,7 @@
 
         <activity
             android:name=".ui.MainActivity"
+            android:theme="@style/Theme.DjTrot.Stage"
             android:exported="true"
             android:launchMode="singleTask">
             <!-- 🔑 주행 중에도 열린다. 대신 화면이 CarUxRestrictions를 따라 스스로 제한한다(DriveContext, LocalCalm). -->
