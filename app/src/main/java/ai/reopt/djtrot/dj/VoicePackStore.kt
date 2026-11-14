@@ -27,6 +27,7 @@ class VoicePackStore(
     private val lock = Mutex()
     @Volatile private var byId: Map<String, Fragment> = emptyMap()
     @Volatile private var byKey: Map<String, File> = emptyMap()
+    @Volatile private var ordered: List<Fragment> = emptyList()
     @Volatile private var loaded = false
     private var syncedAt = 0L
 
@@ -34,6 +35,12 @@ class VoicePackStore(
     fun fragment(id: String): Fragment? {
         restore()
         return byId[id]
+    }
+
+    /** 받아 둔 조각 전부 — 팩에 적힌 순서대로(시연 탭의 멘트 살펴보기). */
+    fun fragments(): List<Fragment> {
+        restore()
+        return ordered
     }
 
     /** 서버가 준 음성 주소를 받아 둔 파일로. 받아 둔 적이 없으면 null. */
@@ -100,6 +107,7 @@ class VoicePackStore(
             val file = File(dir, "$key.mp3")
             if (file.length() > 0) key to Fragment(clip.id, clip.text, file) else null
         }
+        ordered = fragments.map { (_, fragment) -> fragment }
         byId = fragments.associate { (_, fragment) -> fragment.id to fragment }
         byKey = fragments.associate { (key, fragment) -> key to fragment.file }
     }

@@ -58,9 +58,10 @@ object VoiceLines {
     /**
      * 지금 길의 장면. 급한 것부터 — 곧 지나는 곳, 정체·사고, 오래 달림. 그다음은 분위기(충전, 동승, 크루즈, 발길 닿는 대로).
      * 🔑 분위기 장면은 곡의 절반([seed] 짝수)에만 쓴다 — 크루즈를 켜 둔 내내 같은 말만 하지 않게.
+     *    [always]가 참이면(시연) 곡을 가리지 않고 쓴다.
      * 🔴 [local]이 거짓이면 서버로 보낼 값이다 — 동승자 유무는 기기 밖으로 내보내지 않는다.
      */
-    fun scene(drive: DriveContext, seed: Long, local: Boolean): Scene? {
+    fun scene(drive: DriveContext, seed: Long, local: Boolean, always: Boolean = false): Scene? {
         when (drive.ahead) {
             RoadAhead.REST_AREA -> return Scene.REST_AREA
             RoadAhead.TUNNEL -> return Scene.TUNNEL
@@ -69,7 +70,7 @@ object VoiceLines {
         }
         drive.traffic?.let { return if (it.accident) Scene.ACCIDENT else Scene.JAM }
         if (drive.longDrive) return Scene.LONG_DRIVE
-        if (seed % 2 != 0L) return null
+        if (!always && seed % 2 != 0L) return null
         return when {
             drive.charging -> Scene.CHARGING
             drive.company && local -> Scene.COMPANY
@@ -105,8 +106,8 @@ object VoiceLines {
     /**
      * 기기가 고르는 조각 — 차만 아는 것(즐겨찾기의 집·회사, 동승자)까지 쓴다. 기기 밖으로 나가는 값이 없다.
      */
-    fun leadIds(drive: DriveContext, hour: Int, seed: Long): List<String> = leadIds(
-        scene = scene(drive, seed, local = true),
+    fun leadIds(drive: DriveContext, hour: Int, seed: Long, always: Boolean = false): List<String> = leadIds(
+        scene = scene(drive, seed, local = true, always = always),
         weather = weather(drive),
         parked = drive.gear == GearState.PARK,
         hasDestination = drive.destination != null,

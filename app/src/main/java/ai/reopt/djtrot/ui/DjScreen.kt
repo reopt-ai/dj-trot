@@ -1,12 +1,16 @@
 package ai.reopt.djtrot.ui
 
+import ai.reopt.djtrot.BuildConfig
 import ai.reopt.djtrot.DjState
 import ai.reopt.djtrot.DjTrotApp
 import ai.reopt.djtrot.Said
 import ai.reopt.djtrot.api.Labels
 import ai.reopt.djtrot.api.LyricLine
 import ai.reopt.djtrot.car.DriveContext
+import ai.reopt.djtrot.dj.DemoDrive
+import ai.reopt.djtrot.dj.DemoStep
 import ai.reopt.djtrot.dj.StoryBuilder
+import ai.reopt.djtrot.dj.VoicePackStore
 import ai.reopt.djtrot.playback.Shelf
 import androidx.compose.animation.AnimatedContent
 import androidx.activity.compose.BackHandler
@@ -15,6 +19,7 @@ import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
@@ -68,12 +73,12 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.IntOffset
@@ -93,15 +98,15 @@ private val WideWidth = 1682.dp
 private val CompactWidth = 840.dp
 private val DesignHeight = 1210.dp
 
+/** 앱 화면 전체의 모서리 — 안쪽 무대 카드(36dp)보다 살짝 작게 둥글린다. */
+private val WindowCorner = 32.dp
+
 /**
  * DJ 트롯 차량 화면 — 마스터트롯 블랙·골드 콘서트 무대.
  * 🔑 Pleos 창은 한 칸(세로) 또는 두 칸(가로)이다. 두 칸이면 2열, 한 칸이면 1열에 탭으로 다시 짠다
  *    — 2열을 그대로 줄이면 글자를 읽을 수 없다(Pleos App Structure: 세로는 핵심 기능, 가로는 추가 정보).
  * 🔑 각 배치의 기준 창 크기로 그리고, 창이 그보다 작거나 크면 같은 비율로 맞춘다(글자·간격 모두).
  * 🔑 주행 중(CarUxRestrictions)에는 목록·사연 본문을 숨기고, 재생 조작과 짧은 안내만 남긴다.
-/** 앱 화면 전체의 모서리 — 안쪽 무대 카드(36dp)보다 살짝 작게 둥글린다. */
-private val WindowCorner = 32.dp
-
  */
 @Composable
 fun DjScreen(app: DjTrotApp, player: Player?) {
@@ -117,7 +122,7 @@ fun DjScreen(app: DjTrotApp, player: Player?) {
 }
 
 /**
- * 화면 칸. 넓은 창은 무대 열 아래에 [재생 | DJ]만, 좁은 창은 네 칸을 모두 아래 탭으로 오간다.
+ * 화면 칸. 넓은 창은 무대 열 아래에 [재생 | DJ | 설정]만, 좁은 창은 모든 칸을 아래 탭으로 오간다.
  * 🔑 탭은 화면 아래에 둔다 — 운전석에서 손이 닿기 쉬운 쪽이고, Pleos GNB와 같은 높이 흐름이다.
  */
 private enum class Section(val label: String, val icon: ImageVector) {
@@ -125,10 +130,14 @@ private enum class Section(val label: String, val icon: ImageVector) {
     DJ("DJ", DjIcons.Mic),
     SONGS("노래", DjIcons.Queue),
     REQUEST("생성곡", DjIcons.Sparkle),
+
+    /** 설정 — 길 위의 상황을 버튼으로 흉내 내는 시연과 DJ 멘트 살펴보기(공모전·전시용, `BuildConfig.DEMO`). */
+    DEMO("설정", DjIcons.Settings),
 }
 
 /** 무대(재생·DJ 칸)가 그리는 것과 할 수 있는 일. */
 private class StageModel(
+    val app: DjTrotApp,
     val ui: PlayerUi,
     val progress: Progress,
     val dj: DjState,
@@ -140,12 +149,19 @@ private class StageModel(
     val talks: Boolean,
     val onToggleTalks: () -> Unit,
     val onReplay: () -> Unit,
+    /** 시연이 덧씌운 상황. 시연 중이 아니면 null. */
+    val demo: DemoDrive?,
+    val onDemo: (DemoStep) -> Unit,
+    val onEndDemo: () -> Unit,
+    val demoLines: () -> List<VoicePackStore.Fragment>,
+    val onDemoLine: (String) -> Unit,
 )
 
 @Composable
 private fun DjContent(app: DjTrotApp, player: Player?, compact: Boolean) {
     val drive by app.car.state.collectAsStateWithLifecycle()
     val dj by app.dj.collectAsStateWithLifecycle()
+    val demo by app.demo.collectAsStateWithLifecycle()
     val ui = rememberPlayerUi(player)
     var now by remember { mutableStateOf(LocalTime.now()) }
     var talks by remember { mutableStateOf(app.djTalks) }
@@ -170,7 +186,9 @@ private fun DjContent(app: DjTrotApp, player: Player?, compact: Boolean) {
     val progress = rememberProgress(player, ui, intervalMs = if (lyrics.isEmpty() || driving) 250 else 80)
 
     // 🔑 넓은 창의 노래·신청곡은 오른쪽 열에 늘 있다. 좁은 창도 주행 중에는 무대 두 칸만 연다.
-    val sections = if (compact && !driving) Section.entries else listOf(Section.PLAY, Section.DJ)
+    // 시연 칸은 무대 칸이라 주행 중(시연이 덧씌운 주행 포함)에도 열려 있다.
+    val available = Section.entries.filter { it != Section.DEMO || BuildConfig.DEMO }
+    val sections = if (compact && !driving) available else available.filter { it == Section.PLAY || it == Section.DJ || it == Section.DEMO }
     val shown = section.takeIf { it in sections } ?: Section.PLAY
     BackHandler(enabled = shown != Section.PLAY) { section = Section.PLAY }
     // DJ가 새로 한 말은 DJ 탭을 열 때까지 점으로 알린다.
@@ -178,6 +196,7 @@ private fun DjContent(app: DjTrotApp, player: Player?, compact: Boolean) {
     val fresh = dj.line != null && dj.line != seenLine && shown != Section.DJ
 
     val model = StageModel(
+        app = app,
         ui = ui,
         progress = progress,
         dj = dj,
@@ -192,6 +211,11 @@ private fun DjContent(app: DjTrotApp, player: Player?, compact: Boolean) {
             if (!talks) app.voice.stop()
         },
         onReplay = { dj.line?.let(app.voice::speak) },
+        demo = demo,
+        onDemo = app::demo,
+        onEndDemo = app::endDemo,
+        demoLines = app.voicePack::fragments,
+        onDemoLine = { app.demoLines.tryEmit(it) },
     )
 
     Box(Modifier.fillMaxSize()) {
@@ -206,7 +230,7 @@ private fun DjContent(app: DjTrotApp, player: Player?, compact: Boolean) {
                 Column(Modifier.fillMaxSize().padding(horizontal = 28.dp, vertical = 24.dp)) {
                     Box(Modifier.weight(1f).fillMaxWidth()) {
                         when (shown) {
-                            Section.PLAY, Section.DJ -> StagePanel(shown, model, player, Modifier.fillMaxSize())
+                            Section.PLAY, Section.DJ, Section.DEMO -> StagePanel(shown, model, player, Modifier.fillMaxSize())
                             Section.SONGS -> SongShelf(app, shelf, ui, player, Modifier.fillMaxSize())
                             Section.REQUEST -> Column(verticalArrangement = Arrangement.spacedBy(24.dp)) {
                                 RequestCard(app, request, drive, driving, ui.songId)
@@ -391,7 +415,7 @@ private fun OnAirBadge(onAir: Boolean) {
 /**
  * 무대 — 장르 공연 장면 위에 재생 칸 또는 DJ 칸, 그 아래 늘 같은 자리의 진행 막대와 조작부.
  * 🔑 그림은 위쪽에만 보이고 아래로 갈수록 검정에 묻힌다. 조작부는 평평한 검정 위다.
- * 🔑 칸을 바꿔도 조작부는 움직이지 않는다 — 손이 기억한 자리에 늘 있어야 한다.
+ * 🔑 재생·DJ 칸을 오가도 조작부는 움직이지 않는다 — 손이 기억한 자리에 늘 있어야 한다. 설정 칸에는 조작부가 없다.
  */
 @Composable
 private fun StagePanel(view: Section, m: StageModel, player: Player?, modifier: Modifier) {
@@ -412,10 +436,18 @@ private fun StagePanel(view: Section, m: StageModel, player: Player?, modifier: 
                 ),
             ),
         )
+        // 🔑 설정의 상세(시뮬레이션·멘트 살펴보기)로 들어가면 무대가 뒤에서 어두워진다 — 버튼과 글이 무대 조명에 묻히지 않게.
+        var settingsPage by rememberSaveable { mutableStateOf(SettingsPage.HOME) }
+        val dim by animateFloatAsState(if (view == Section.DEMO && settingsPage != SettingsPage.HOME) 0.72f else 0f, tween(if (LocalCalm.current) 120 else 420), label = "dim")
+        if (dim > 0f) Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = dim)))
         Column(Modifier.fillMaxSize().padding(start = 44.dp, end = 44.dp, top = 40.dp, bottom = 32.dp)) {
             Crossfade(targetState = view, animationSpec = tween(250), label = "view", modifier = Modifier.weight(1f).fillMaxWidth()) { shown ->
                 when {
                     shown == Section.DJ -> DjView(m, Modifier.fillMaxSize())
+                    shown == Section.DEMO -> DemoView(
+                        m.app, m.drive, m.driving, m.talks, m.onToggleTalks,
+                        onStartMusic = { player?.let { if (m.ui.hasItems) it.play() else playList(it, Shelf.PICKS.id) } },
+                        settingsPage, { settingsPage = it }, m.demo, m.ui.playing, m.dj.line, columns = if (m.roomy) 4 else 3, onStep = m.onDemo, onEnd = m.onEndDemo, lines = m.demoLines, onLine = m.onDemoLine, modifier = Modifier.fillMaxSize())
                     live -> PlayView(m, Modifier.fillMaxSize())
                     else -> StageIdle(player, Modifier.fillMaxSize())
                 }
@@ -424,7 +456,8 @@ private fun StagePanel(view: Section, m: StageModel, player: Player?, modifier: 
                 Spacer(Modifier.height(16.dp))
                 ErrorNotice(it)
             }
-            if (live) {
+            // 🔑 설정 칸에서는 진행 막대와 조작부를 그리지 않는다 — 메뉴와 시뮬레이션 버튼에 자리를 내준다.
+            if (live && view != Section.DEMO) {
                 Spacer(Modifier.height(24.dp))
                 Transport(m.ui, m.progress, player)
             }

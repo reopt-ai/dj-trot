@@ -10,6 +10,8 @@ plugins {
 val djTrotApi = providers.gradleProperty("djtrot.api").orElse("https://miniapp.reopt.ai/api/v1/dj-trot")
 // 🔑 Pleos Playground 프로젝트의 Client ID/Secret — TTS·STT 서버(하이브리드) 모드에 쓴다. 저장소에 넣지 말고 ~/.gradle/gradle.properties에 둔다.
 //    없으면 온디바이스 모드로만 말한다(에뮬레이터 온디바이스 엔진은 ON_DEVICE_ENGINE_ERROR로 실패한다).
+// 🔑 시연 탭(화면에서 길 위의 상황을 버튼으로 흉내 낸다) — 공모전·전시용. 끄려면 -Pdjtrot.demo=false
+val djTrotDemo = providers.gradleProperty("djtrot.demo").orElse("true")
 val pleosClientId = providers.gradleProperty("djtrot.pleosClientId").orElse("")
 val pleosClientSecret = providers.gradleProperty("djtrot.pleosClientSecret").orElse("")
 
@@ -26,6 +28,7 @@ android {
         versionCode = 1
         versionName = "0.1.0"
         buildConfigField("String", "DJ_TROT_API", "\"${djTrotApi.get()}\"")
+        buildConfigField("boolean", "DEMO", if (djTrotDemo.get().toBoolean()) "true" else "false")
         buildConfigField("String", "PLEOS_CLIENT_ID", "\"${pleosClientId.get()}\"")
         buildConfigField("String", "PLEOS_CLIENT_SECRET", "\"${pleosClientSecret.get()}\"")
     }

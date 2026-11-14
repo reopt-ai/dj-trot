@@ -241,8 +241,8 @@ class CarSignals(context: Context) {
     }
 
     /**
-     * 시험 도구(디버그 빌드의 `TriggerReceiver`, `tools/trigger.py`)가 차량 신호를 흉내 낸다. null이면 실제 값으로 돌아간다.
-     * 🔑 릴리스 빌드에는 부르는 곳이 없다.
+     * 시험 도구(디버그 빌드의 `TriggerReceiver`, `tools/trigger.py`)와 화면의 시연 탭(`dj/Demo`)이 차량 신호를 흉내 낸다. null이면 실제 값으로 돌아간다.
+     * 🔑 시연 탭을 끈 빌드(`djtrot.demo=false`)의 릴리스에는 부르는 곳이 없다.
      */
     internal fun stage(change: ((DriveContext) -> DriveContext)?) {
         staged.value = change ?: { it }

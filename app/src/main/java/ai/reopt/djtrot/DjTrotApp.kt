@@ -6,11 +6,17 @@ import ai.reopt.djtrot.account.DeviceVault
 import ai.reopt.djtrot.api.DjTrotApi
 import ai.reopt.djtrot.api.Labels
 import ai.reopt.djtrot.car.CarSignals
+import ai.reopt.djtrot.dj.AutoDemo
+import ai.reopt.djtrot.dj.DemoDrive
+import ai.reopt.djtrot.dj.DemoEvent
+import ai.reopt.djtrot.dj.DemoScenario
+import ai.reopt.djtrot.dj.DemoStep
 import ai.reopt.djtrot.dj.DjVoice
 import ai.reopt.djtrot.dj.FallbackDjVoice
 import ai.reopt.djtrot.dj.SongOrders
 import ai.reopt.djtrot.dj.SongRequest
 import ai.reopt.djtrot.dj.StoryMic
+import ai.reopt.djtrot.dj.pauseSeconds
 import ai.reopt.djtrot.dj.toInput
 import ai.reopt.djtrot.playback.Catalog
 import android.app.Application
@@ -20,7 +26,10 @@ import java.time.Instant
 import ai.reopt.djtrot.dj.VoicePackStore
 import java.io.File
 import java.time.LocalTime
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.MainScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -104,6 +113,70 @@ class DjTrotApp : Application() {
         }
     }
 
+    /** 시연 탭이 덧씌운 길 위의 상황. null이면 실제 차량 신호 그대로다. */
+    val demo = MutableStateFlow<DemoDrive?>(null)
+
+    /** 시연 버튼이 "지금 이 상황으로 다시 말해 줘"라고 재생 서비스에 보내는 신호. */
+    val demoCues = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+
+    /** 시연 탭의 멘트 살펴보기에서 고른 조각 ID — 재생 서비스가 그 조각을 바로 들려준다. */
+    val demoLines = MutableSharedFlow<String>(extraBufferCapacity = 1)
+
+    /** 시연 중이면 DJ가 인사에 쓰는 시각을 시연이 정한다. */
+    fun clock(): LocalTime = LocalTime.now().let { now -> demo.value?.clock(now) ?: now }
+
+    /**
+     * 시연 버튼 — 상황을 덧씌우고, 출발·경유·도착이면 그 사건을 내고, 아니면 DJ에게 지금 곡 위에서 다시 말하게 한다.
+     * 🔑 노래가 멈춰 있으면 DJ는 말하지 않는다(실제와 같다). 화면이 그 사실을 알린다.
+     */
+    fun demo(step: DemoStep) {
+        val before = demo.value ?: DemoDrive()
+        val next = step.change(before)
+        demo.value = next
+        car.stage(next::apply)
+        when (val event = step.event?.invoke(before)) {
+            is DemoEvent.Depart -> car.stage(event.departure)
+            is DemoEvent.Arrive -> car.stage(event.arrival)
+            is DemoEvent.Waypoint -> car.stage(event.arrival, waypoint = true)
+            null -> if (step.speak) demoCues.tryEmit(Unit)
+        }
+    }
+
+    /** 지금 돌고 있는 자동 시연. 없으면 null. */
+    val autoDemo = MutableStateFlow<AutoDemo?>(null)
+    private var autoJob: Job? = null
+
+    /**
+     * 자동 시연을 시작한다 — [leadMs] 뒤부터 버튼을 차례로 누르고, 버튼마다 DJ가 말을 마칠 만큼 기다린다.
+     * 🔑 노래를 트는 일은 화면이 한다(사용자가 누른 동작). 여기서는 상황만 바꾼다.
+     */
+    fun startAuto(scenario: DemoScenario, leadMs: Long) {
+        autoJob?.cancel()
+        autoJob = scope.launch {
+            delay(leadMs)
+            scenario.steps.forEachIndexed { index, step ->
+                autoDemo.value = AutoDemo(scenario.id, scenario.title, index, scenario.steps.size, step.label)
+                demo(step)
+                delay(step.pauseSeconds * 1000L)
+            }
+            autoDemo.value = null
+        }
+    }
+
+    /** 자동 시연을 멈춘다. 덧씌운 상황은 그대로 둔다. */
+    fun stopAuto() {
+        autoJob?.cancel()
+        autoJob = null
+        autoDemo.value = null
+    }
+
+    /** 시연을 끝내고 실제 차량 신호로 돌아간다. */
+    fun endDemo() {
+        stopAuto()
+        demo.value = null
+        car.stage(null)
+    }
+
     /** DJ 음성 팩을 뒤에서 받아 둔다. 다 받은 지 얼마 안 됐으면 아무것도 하지 않고, 실패하면 다음에 잇는다. */
     fun syncVoicePack() {
         scope.launch { runCatching { voicePack.sync() } }
@@ -127,8 +200,24 @@ class DjTrotApp : Application() {
         get() = getSharedPreferences(PREFS, MODE_PRIVATE).getBoolean(KEY_TALKS, true)
         set(value) { getSharedPreferences(PREFS, MODE_PRIVATE).edit { putBoolean(KEY_TALKS, value) } }
 
-    private companion object {
-        const val PREFS = "djtrot"
-        const val KEY_TALKS = "dj_talks"
+    /**
+     * DJ가 길게 말하는 간격 — 1이면 매 곡, 3이면 첫 곡과 그 뒤 세 곡마다(기본), 0이면 늘 곡 소개만. 기기에만 저장한다.
+     */
+    var fullEvery: Int
+        get() = getSharedPreferences(PREFS, MODE_PRIVATE).getInt(KEY_FULL_EVERY, DEFAULT_FULL_EVERY)
+        set(value) { getSharedPreferences(PREFS, MODE_PRIVATE).edit { putInt(KEY_FULL_EVERY, value) } }
+
+    /** DJ가 말하는 동안 음악 크기(0~1) — 작을수록 음악이 많이 줄어든다. 기기에만 저장한다. */
+    var duckLevel: Float
+        get() = getSharedPreferences(PREFS, MODE_PRIVATE).getFloat(KEY_DUCK, DEFAULT_DUCK)
+        set(value) { getSharedPreferences(PREFS, MODE_PRIVATE).edit { putFloat(KEY_DUCK, value) } }
+
+    companion object {
+        const val DEFAULT_FULL_EVERY = 3
+        const val DEFAULT_DUCK = 0.3f
+        private const val PREFS = "djtrot"
+        private const val KEY_TALKS = "dj_talks"
+        private const val KEY_FULL_EVERY = "dj_full_every"
+        private const val KEY_DUCK = "dj_duck"
     }
 }
