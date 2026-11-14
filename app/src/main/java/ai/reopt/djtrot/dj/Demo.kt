@@ -5,6 +5,7 @@ import ai.reopt.djtrot.car.Departure
 import ai.reopt.djtrot.car.Destination
 import ai.reopt.djtrot.car.DriveContext
 import ai.reopt.djtrot.car.GearState
+import ai.reopt.djtrot.car.GeoPoint
 import ai.reopt.djtrot.car.PlaceKind
 import ai.reopt.djtrot.car.RoadAhead
 import ai.reopt.djtrot.car.Traffic
@@ -30,6 +31,8 @@ data class DemoDrive(
     val charging: Boolean = false,
     val freeDrive: Boolean = false,
     val tripMinutes: Int? = null,
+    /** 지금 좌표 — 광고의 좌표 조건을 흉내 낼 때만 쓴다. null이면 실제 값. */
+    val location: GeoPoint? = null,
     /** 시간대 인사를 바꿔 보이는 시(0~23). null이면 지금 시각. */
     val hour: Int? = null,
 ) {
@@ -37,6 +40,7 @@ data class DemoDrive(
     fun apply(real: DriveContext): DriveContext = real.copy(
         gear = gear,
         currentAddress = address ?: real.currentAddress,
+        location = location ?: real.location,
         destination = destination,
         traffic = traffic,
         ahead = ahead,
@@ -58,7 +62,7 @@ data class DemoDrive(
     /** 길 위의 한 장면만 남긴다 — 버튼 하나가 그 장면의 말을 꺼내게, 앞서 누른 장면을 지운다. 목적지·기어·시간대는 둔다. */
     fun road(): DemoDrive = copy(
         gear = GearState.DRIVE, traffic = null, ahead = null, raining = false, fog = false, company = false, cruising = false,
-        schoolZone = false, signaling = false, charging = false, freeDrive = false, tripMinutes = null,
+        schoolZone = false, signaling = false, charging = false, freeDrive = false, tripMinutes = null, location = null,
     )
 
     /** 화면에 보이는 지금 상황 한 줄. */

@@ -4,6 +4,7 @@ import ai.reopt.djtrot.BuildConfig
 import ai.reopt.djtrot.DjState
 import ai.reopt.djtrot.DjTrotApp
 import ai.reopt.djtrot.Said
+import ai.reopt.djtrot.api.DjInfo
 import ai.reopt.djtrot.api.Labels
 import ai.reopt.djtrot.api.LyricLine
 import ai.reopt.djtrot.car.DriveContext
@@ -138,6 +139,8 @@ private enum class Section(val label: String, val icon: ImageVector) {
 /** 무대(재생·DJ 칸)가 그리는 것과 할 수 있는 일. */
 private class StageModel(
     val app: DjTrotApp,
+    /** 지금 말하는 DJ의 이름 — DJ 칸의 머리에 보인다. */
+    val djName: String,
     val ui: PlayerUi,
     val progress: Progress,
     val dj: DjState,
@@ -162,6 +165,8 @@ private fun DjContent(app: DjTrotApp, player: Player?, compact: Boolean) {
     val drive by app.car.state.collectAsStateWithLifecycle()
     val dj by app.dj.collectAsStateWithLifecycle()
     val demo by app.demo.collectAsStateWithLifecycle()
+    val djId by app.djId.collectAsStateWithLifecycle()
+    val djs by app.djs.collectAsStateWithLifecycle()
     val ui = rememberPlayerUi(player)
     var now by remember { mutableStateOf(LocalTime.now()) }
     var talks by remember { mutableStateOf(app.djTalks) }
@@ -197,6 +202,7 @@ private fun DjContent(app: DjTrotApp, player: Player?, compact: Boolean) {
 
     val model = StageModel(
         app = app,
+        djName = djs.firstOrNull { it.id == djId }?.name ?: DjInfo.DEFAULT.name,
         ui = ui,
         progress = progress,
         dj = dj,
@@ -556,7 +562,7 @@ private fun DjView(m: StageModel, modifier: Modifier) {
             Spacer(Modifier.width(24.dp))
             Column(Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("DJ 트롯", style = headline(DjType.TitleM, DjColors.Gold2))
+                    Text(m.djName, style = headline(DjType.TitleM, DjColors.Gold2))
                     Spacer(Modifier.width(18.dp))
                     OnAirBadge(m.ui.playing && m.talks)
                 }

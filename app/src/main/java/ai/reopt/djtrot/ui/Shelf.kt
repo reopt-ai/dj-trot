@@ -96,6 +96,10 @@ fun RightRail(app: DjTrotApp, shelf: ShelfMemory, request: SongRequest, drive: D
 fun RequestCard(app: DjTrotApp, suggestion: SongRequest, drive: DriveContext, driving: Boolean, nowSongId: String?) {
     val connection by app.account.connection.collectAsStateWithLifecycle()
     val tokens by app.orders.tokens.collectAsStateWithLifecycle()
+    // 광고 진행 — 광고가 있고 휴대폰을 연결했을 때만 보인다. "광고 1/3"
+    val ads by app.ads.list.collectAsStateWithLifecycle()
+    val adProgress by app.ads.progress.collectAsStateWithLifecycle()
+    val adLine = adProgress?.takeIf { ads.isNotEmpty() }?.let { if (it.capped) "광고 생성권 가득" else "광고 ${it.progress}/${it.needed}" }
     val order by app.orders.current.collectAsStateWithLifecycle()
     val hearing by app.mic.state.collectAsStateWithLifecycle()
     val dj by app.dj.collectAsStateWithLifecycle()
@@ -170,6 +174,7 @@ fun RequestCard(app: DjTrotApp, suggestion: SongRequest, drive: DriveContext, dr
                 hint = when {
                     !parked -> "정차하면 만들 수 있어요"
                     tokens == 0 -> "토큰이 없어요 · 휴대폰에서 받아 주세요"
+                    tokens != null && adLine != null -> "토큰 1개 · ${tokens}개 남음 · $adLine"
                     tokens != null -> "토큰 1개 · ${tokens}개 남음"
                     else -> "토큰 1개"
                 },

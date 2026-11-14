@@ -121,7 +121,7 @@ object VoiceLines {
     fun genericPlayId(song: SongInfo, seed: Long): String = when {
         song.requested && song.fresh -> "play.request.fresh"
         song.requested -> "play.request.old"
-        else -> pick("play", 3, seed)
+        else -> pick("play", PLAY_VARIANTS, seed)
     }
 
     /** 길 안내를 시작할 때의 조각 — 기준은 [DjScript.departure]와 같다. */
@@ -142,6 +142,9 @@ object VoiceLines {
     }
 
     const val WAYPOINT_ID = "waypoint"
+
+    /** 제목 없는 곡 소개의 변주 수. 🔴 서버의 조각 수와 같아야 한다. */
+    private const val PLAY_VARIANTS = 6
 
     private fun place(kind: PlaceKind?): String = when (kind) {
         PlaceKind.HOME -> "home"

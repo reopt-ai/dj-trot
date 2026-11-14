@@ -2,6 +2,7 @@ package ai.reopt.djtrot.ui
 
 import ai.reopt.djtrot.BuildConfig
 import ai.reopt.djtrot.DjTrotApp
+import ai.reopt.djtrot.api.DjInfo
 import ai.reopt.djtrot.car.DriveContext
 import ai.reopt.djtrot.dj.Demo
 import ai.reopt.djtrot.dj.DemoDrive
@@ -104,6 +105,12 @@ internal fun DemoView(
 ) {
     var last by rememberSaveable { mutableStateOf<String?>(null) }
     val auto by app.autoDemo.collectAsStateWithLifecycle()
+    val ads by app.ads.list.collectAsStateWithLifecycle()
+    val adProgress by app.ads.progress.collectAsStateWithLifecycle()
+    // 지금 고른 DJ — 바뀌면 멘트 목록과 머리의 이름을 다시 읽는다.
+    val djId by app.djId.collectAsStateWithLifecycle()
+    val djs by app.djs.collectAsStateWithLifecycle()
+    val djName = djs.firstOrNull { it.id == djId }?.name ?: DjInfo.DEFAULT.name
     val calm = LocalCalm.current
     BackHandler(enabled = page != SettingsPage.HOME) { onPage(SettingsPage.HOME) }
     AnimatedContent(
@@ -125,8 +132,8 @@ internal fun DemoView(
         Column(Modifier.fillMaxSize()) {
             when (shown) {
                 SettingsPage.HOME -> {
-                    val lineCount = remember { lines().size }
-                    SettingsHero(lineCount = lineCount, simulating = demo != null)
+                    val lineCount = remember(djId) { lines().size }
+                    SettingsHero(djName, lineCount = lineCount, simulating = demo != null)
                     Spacer(Modifier.height(16.dp))
                     // 메뉴 — 한 줄에 하나씩 쌓고, 넘치면 스크롤한다. 시연에 쓰는 것이 먼저, 평소 설정이 다음이다.
                     val tiles: List<@Composable (Modifier) -> Unit> = listOf(
@@ -134,7 +141,7 @@ internal fun DemoView(
                         { SettingsTile(DjIcons.Car, "시뮬레이션", demo?.summary() ?: "출발·비·정체·도착 같은 길 위의 상황을 버튼으로 흉내 내요", null, demo != null, it) { onPage(SettingsPage.SIMULATION) } },
                         { SettingsTile(DjIcons.Mic, "DJ 멘트 살펴보기", "DJ가 준비해 둔 멘트를 보고 하나씩 들어 봐요", null, false, it) { onPage(SettingsPage.LINES) } },
                         { SettingsTile(DjIcons.Flag, "차량 신호", "차가 지금 알려 주는 값을 SDK별로 보여 줘요", null, false, it) { onPage(SettingsPage.SIGNALS) } },
-                        { SettingsTile(DjIcons.VolumeOn, "DJ 설정", "멘트 켜기, 길게 말하는 간격, 멘트 중 음악 크기", null, false, it) { onPage(SettingsPage.DJ) } },
+                        { SettingsTile(DjIcons.VolumeOn, "DJ 설정", "$djName · DJ 고르기, 멘트 간격, 음악 크기", null, false, it) { onPage(SettingsPage.DJ) } },
                         { SettingsTile(DjIcons.Phone, "연결·계정", "휴대폰 연결 상태와 남은 드라이브 토큰", null, false, it) { onPage(SettingsPage.ACCOUNT) } },
                         { SettingsTile(DjIcons.Note, "앱 정보", "버전, DJ 멘트 다시 받기, 오픈소스 표기", null, false, it) { onPage(SettingsPage.ABOUT) } },
                     )
@@ -162,6 +169,21 @@ internal fun DemoView(
                     SimulationStatus(demo, playing, line)
                     Spacer(Modifier.height(6.dp))
                     Column(Modifier.weight(1f).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        // 광고 — 그 광고의 장소에 가까워진 것처럼 덧씌우고, 광고를 다음 곡으로 끼운다.
+                        if (ads.isNotEmpty()) {
+                            GroupTitle("광고 장소 접근 · ${adProgress?.let { "광고 ${it.progress}/${it.needed} · 생성권 ${it.balance}장" } ?: "휴대폰을 연결하면 생성권이 쌓여요"}", DjIcons.Sparkle)
+                            ads.chunked(columns).forEach { row ->
+                                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                    row.forEach { ad ->
+                                        PillButton(ad.title, "${ad.title} 광고의 장소에 가까워져요", selected = last == "ad:${ad.id}", Modifier.weight(1f), height = 80.dp) {
+                                            last = "ad:${ad.id}"
+                                            app.demoAd(ad)
+                                        }
+                                    }
+                                    repeat(columns - row.size) { Spacer(Modifier.weight(1f)) }
+                                }
+                            }
+                        }
                         Demo.GROUPS.forEach { group ->
                             GroupTitle(group.title, groupIcon(group.title))
                             val perRow = group.columns ?: columns
@@ -199,7 +221,7 @@ internal fun DemoView(
                 }
                 SettingsPage.DJ -> {
                     DetailHeader(DjIcons.VolumeOn, shown.title, "DJ가 언제, 얼마나 말할지 정해요", onBack = { onPage(SettingsPage.HOME) })
-                    DjSettingsPage(app, talks, onToggleTalks)
+                    DjSettingsPage(app, djs, djId, talks, onToggleTalks)
                 }
                 SettingsPage.ACCOUNT -> {
                     DetailHeader(DjIcons.Phone, shown.title, "휴대폰 연결과 드라이브 토큰", onBack = { onPage(SettingsPage.HOME) })
@@ -210,7 +232,7 @@ internal fun DemoView(
                     AboutPage(app)
                 }
                 SettingsPage.LINES -> {
-                    val all = remember { lines() }
+                    val all = remember(djId) { lines() }
                     DetailHeader(DjIcons.Mic, shown.title, "누르면 DJ 목소리로 들려 드려요", onBack = { onPage(SettingsPage.HOME) }) {
                         StatusPill(DjIcons.VolumeOn, "${all.size}개", on = all.isNotEmpty())
                     }
@@ -330,7 +352,7 @@ internal fun GroupTitle(title: String, icon: ImageVector? = null) {
  * 🔑 재생 칸의 무대 간판과 같은 말투로 꾸민다 — 설정도 무대의 한 칸이다.
  */
 @Composable
-private fun SettingsHero(lineCount: Int, simulating: Boolean) {
+private fun SettingsHero(djName: String, lineCount: Int, simulating: Boolean) {
     val gold = Brush.verticalGradient(listOf(DjColors.Gold2, DjColors.SatinEdge, DjColors.Gold, DjColors.GoldDeep))
     Row(verticalAlignment = Alignment.CenterVertically) {
         Box(
@@ -359,7 +381,7 @@ private fun SettingsHero(lineCount: Int, simulating: Boolean) {
     }
     Spacer(Modifier.height(16.dp))
     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-        StatusPill(DjIcons.Mic, if (lineCount > 0) "DJ 멘트 ${lineCount}개 준비됨" else "DJ 멘트 받는 중", on = lineCount > 0)
+        StatusPill(DjIcons.Mic, if (lineCount > 0) "$djName · 멘트 ${lineCount}개" else "$djName · 멘트 받는 중", on = lineCount > 0)
         StatusPill(DjIcons.Car, if (simulating) "시뮬레이션 진행 중" else "실제 차량 신호", on = simulating)
     }
     Spacer(Modifier.height(18.dp))

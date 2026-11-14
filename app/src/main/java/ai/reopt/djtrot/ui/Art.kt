@@ -30,6 +30,17 @@ object Art {
         else -> R.drawable.art_concert
     }
 
+    /**
+     * DJ 얼굴 — 설정의 DJ 고르기에 쓴다. 서버 `/config`의 `avatarUrl`과 같은 그림을 앱 안에 담아 오프라인에서도 보인다.
+     * 🔑 DJ ID는 서버와의 계약(`hwanggu`·`mari`). 모르는 DJ는 null — 부르는 쪽이 마이크 아이콘으로 돌아간다.
+     */
+    @DrawableRes
+    fun dj(id: String?): Int? = when (id) {
+        "hwanggu" -> R.drawable.dj_hwanggu
+        "mari" -> R.drawable.dj_mari
+        else -> null
+    }
+
     /** 장르 갈래 — 발라드 갈래는 하나로 본다. */
     fun family(style: String?): String? = if (style == "ballad" || style == "ballad-calm") "ballad" else style
 

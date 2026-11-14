@@ -127,6 +127,9 @@ class Catalog(private val api: DjTrotApi, private val account: DeviceAccount) {
         return found.map(::keep)
     }
 
+    /** 광고 음악을 재생 항목으로 — 목록(선반·내 노래)에는 넣지 않는다. */
+    fun ad(song: TrotSong): MediaItem = keep(song)
+
     private fun keep(song: TrotSong): MediaItem {
         songs[song.id] = song
         return playable(song)

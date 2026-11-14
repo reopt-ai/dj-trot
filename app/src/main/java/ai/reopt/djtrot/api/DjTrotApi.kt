@@ -43,11 +43,14 @@ class DjTrotApi(
     /**
      * 🔑 [token]은 이미 가진 세션이 있을 때만 붙인다 — 서버가 주인을 확인하면 신청곡을 제목으로 소개한다. 없어도 브리프는 온다.
      */
-    suspend fun brief(drive: DriveInput, voice: Boolean, nowPlaying: NowPlaying? = null, ment: String? = null, token: String? = null): DjBrief =
-        call(post("$base/dj/brief", BriefRequest(drive, voice, nowPlaying, ment), BriefRequest.serializer(), token), DjBrief.serializer(), briefClient)
+    suspend fun brief(drive: DriveInput, voice: Boolean, nowPlaying: NowPlaying? = null, ment: String? = null, token: String? = null, dj: String? = null): DjBrief =
+        call(post("$base/dj/brief", BriefRequest(drive, voice, nowPlaying, ment, dj), BriefRequest.serializer(), token), DjBrief.serializer(), briefClient)
 
-    /** 미리 받아 두는 DJ 음성 팩의 목록. */
-    suspend fun voicePack(): VoicePack = call(get("$base/dj/voice-pack"), VoicePack.serializer())
+    /** 미리 받아 두는 DJ 음성 팩의 목록 — DJ마다 따로다. */
+    suspend fun voicePack(dj: String = DjInfo.DEFAULT_ID): VoicePack {
+        val url = "$base/dj/voice-pack".toHttpUrl().newBuilder().addQueryParameter("dj", dj).build().toString()
+        return call(get(url), VoicePack.serializer())
+    }
 
     /** 음성 조각 하나를 [into]에 내려받는다. 실패하면 던진다. */
     suspend fun download(url: String, into: File): Unit = withContext(Dispatchers.IO) {
@@ -66,7 +69,16 @@ class DjTrotApi(
     suspend fun deviceSession(device: DeviceCredential): DeviceSession =
         call(post("$base/devices/session", device, DeviceCredential.serializer()), DeviceSession.serializer())
 
+    /** 광고 목록 — 광고 음악과 틀 조건. 장소 판단은 차가 한다. */
+    suspend fun ads(): AdsResponse = call(get("$base/ads"), AdsResponse.serializer())
+
     // ── 로그인 ──
+    suspend fun adProgress(token: String): AdProgress = call(get("$base/ads/progress", token), AdProgress.serializer())
+
+    /** 광고 한 편을 끝까지 들었다고 알린다 — 세 번이면 생성권 한 장. 같은 [playKey]는 한 번만 센다. */
+    suspend fun adHeard(token: String, adId: String, playKey: String): AdProgress =
+        call(post("$base/ads/$adId/heard", AdHeard(playKey), AdHeard.serializer(), token), AdProgress.serializer())
+
     suspend fun benefits(token: String): BenefitSnapshot = call(get("$base/benefits", token), BenefitSnapshot.serializer())
 
     suspend fun createSong(token: String, request: CreateSong): DriveSong =

@@ -97,7 +97,23 @@ data class DjConfig(
     val choices: Choices = Choices(),
     val defaults: ChoiceDefaults = ChoiceDefaults(),
     val tokens: TokenPolicy = TokenPolicy(),
+    /** 고를 수 있는 DJ. 예전 서버는 주지 않는다 — 그때는 기본 DJ만 쓴다. */
+    val djs: List<DjInfo> = emptyList(),
 )
+
+/**
+ * DJ — 목소리와 말투가 다른 진행자. [ready]가 참이면 서버에 그 DJ의 음성 팩이 준비돼 있어 고를 수 있다.
+ * 🔴 [id]는 서버와의 계약이다(`hwanggu`·`mari`).
+ */
+@Serializable
+data class DjInfo(val id: String, val name: String, val description: String = "", val ready: Boolean = false) {
+    companion object {
+        const val DEFAULT_ID = "hwanggu"
+
+        /** 서버가 DJ 목록을 주지 않을 때 — 기본 DJ 하나. */
+        val DEFAULT = DjInfo(DEFAULT_ID, "DJ 황", "느끼한 다방 DJ · 낮고 느린 목소리", ready = true)
+    }
+}
 
 /**
  * 서버에 보내는 드라이브 맥락. 🔴 서버 스키마가 strict라 이 키만 보낸다(모르는 키는 400).
@@ -139,8 +155,10 @@ data class BriefRequest(
     val drive: DriveInput,
     val voice: Boolean,
     val nowPlaying: NowPlaying? = null,
-    /** full · short. short면 곡 소개만 받는다. 정하지 않으면 보내지 않는다. */
+    /** full · short · lead. short면 곡 소개만, lead면 곡 소개 없이 상황의 말만 받는다. 정하지 않으면 보내지 않는다. */
     val ment: String? = null,
+    /** 말하는 DJ의 ID. 정하지 않으면 보내지 않고, 서버가 기본 DJ로 답한다. */
+    val dj: String? = null,
 )
 
 /** DJ 브리프가 제안하는 신청곡. */
@@ -273,6 +291,38 @@ object Labels {
 /** DJ 음성 팩의 조각 하나 — [id]는 조각의 뜻(서버와의 계약), [text]는 화면에 보일 글, [url]은 음성 주소. */
 @Serializable
 data class VoiceClip(val id: String, val text: String, val url: String)
+
+/** 광고 장소 — 이 좌표의 [radiusMeters] 안에 들어오면 맞는다. */
+@Serializable
+data class AdPlace(val name: String = "", val latitude: Double, val longitude: Double, val radiusMeters: Int = 500)
+
+/** 광고 조건 — 셋 가운데 하나라도 맞으면 튼다. 판단은 차가 한다(좌표·주소는 서버로 가지 않는다). */
+@Serializable
+data class AdConditions(
+    /** 지나는 주소나 목적지의 이름·주소에 이 낱말이 있으면 맞는다. */
+    val keywords: List<String> = emptyList(),
+    /** 목적지 이름에 이 낱말이 있으면 맞는다(서버가 목적지 종류를 낱말로 풀어 준다). */
+    val destinationWords: List<String> = emptyList(),
+    val places: List<AdPlace> = emptyList(),
+)
+
+/** 광고 한 편 — 광고 음악([song])과 틀 조건. */
+@Serializable
+data class Ad(val id: String, val title: String, val song: TrotSong, val conditions: AdConditions = AdConditions())
+
+@Serializable
+data class AdReward(val listens: Int = 3, val tokens: Int = 1, val maxBalance: Int = 2)
+
+@Serializable
+data class AdsResponse(val ads: List<Ad> = emptyList(), val reward: AdReward = AdReward())
+
+/** 광고 한 편을 끝까지 들었다는 알림 — [playKey]는 그 재생 한 번의 키다(같은 키는 한 번만 센다). */
+@Serializable
+data class AdHeard(val playKey: String)
+
+/** 광고 진행 — 다음 생성권까지 들은 횟수. [capped]면 생성권이 가득 차 기다리는 중이다. */
+@Serializable
+data class AdProgress(val progress: Int = 0, val needed: Int = 3, val granted: Boolean = false, val capped: Boolean = false, val balance: Int = 0)
 
 /** 차가 미리 받아 두는 DJ 음성 팩. [version]이 null이면 서버가 팩을 쓰지 않는 중이다. */
 @Serializable

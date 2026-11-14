@@ -3,9 +3,15 @@ package ai.reopt.djtrot
 import ai.reopt.djtrot.account.Connection
 import ai.reopt.djtrot.account.DeviceAccount
 import ai.reopt.djtrot.account.DeviceVault
+import ai.reopt.djtrot.api.Ad
+import ai.reopt.djtrot.api.DjConfig
+import ai.reopt.djtrot.api.DjInfo
 import ai.reopt.djtrot.api.DjTrotApi
 import ai.reopt.djtrot.api.Labels
 import ai.reopt.djtrot.car.CarSignals
+import ai.reopt.djtrot.car.Destination
+import ai.reopt.djtrot.car.GeoPoint
+import ai.reopt.djtrot.dj.Ads
 import ai.reopt.djtrot.dj.AutoDemo
 import ai.reopt.djtrot.dj.DemoDrive
 import ai.reopt.djtrot.dj.DemoEvent
@@ -20,12 +26,14 @@ import ai.reopt.djtrot.dj.pauseSeconds
 import ai.reopt.djtrot.dj.toInput
 import ai.reopt.djtrot.playback.Catalog
 import android.app.Application
+import android.content.Intent
 import androidx.core.content.edit
 import java.time.Duration
 import java.time.Instant
 import ai.reopt.djtrot.dj.VoicePackStore
 import java.io.File
 import java.time.LocalTime
+import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.delay
@@ -85,16 +93,147 @@ data class DjState(
     }
 }
 
+/**
+ * 볼 수 있는 서버. [BUILT]는 빌드가 정한 서버(`djtrot.api`)다 — 운영을 보게 빌드했으면 운영, 아니면 로컬이다.
+ * 나머지 하나가 개발자 모드에서 고르는 "다른 쪽" 서버다.
+ */
+enum class Server {
+    BUILT,
+    OTHER,
+    ;
+
+    /** 이 서버가 운영인가. */
+    val production: Boolean get() = url == PRODUCTION_API
+
+    val label: String get() = if (production) "프로덕션" else "로컬"
+
+    val url: String
+        get() = when (this) {
+            BUILT -> BuildConfig.DJ_TROT_API
+            OTHER -> if (BuildConfig.DJ_TROT_API == PRODUCTION_API) BuildConfig.DJ_TROT_LOCAL_API else PRODUCTION_API
+        }
+
+    companion object {
+        const val PRODUCTION_API = "https://miniapp.reopt.ai/api/v1/dj-trot"
+    }
+}
+
+/**
+ * 멘트 요청 한 번의 기록 — 서버에 보낸 것([request], JSON), 받은 것([response]), 기기가 받아 둔 팩에서 고른 조각([local]).
+ * [request]가 null이면 서버에 묻지 않고 기기 조각만으로 말했다.
+ */
+data class BriefTrace(val at: LocalTime, val request: String?, val response: String, val local: List<String> = emptyList())
+
 class DjTrotApp : Application() {
     private val scope = MainScope()
-    val api by lazy { DjTrotApi(BuildConfig.DJ_TROT_API) }
-    val account by lazy { DeviceAccount(api, DeviceVault(this)) }
+    /**
+     * 지금 보는 서버 — 개발자 모드(설정 › 앱 정보)에서 바꾼다. 기본은 빌드가 정한 서버다.
+     * 🔑 앱을 시작할 때 한 번 읽는다. 바꾸면 앱을 다시 시작해 모든 것(계정·목록·주문·음성 팩)을 새 서버로 다시 만든다.
+     */
+    val server: Server by lazy {
+        getSharedPreferences(PREFS, MODE_PRIVATE).getString(KEY_SERVER, null)?.let { saved -> Server.entries.firstOrNull { it.name == saved } } ?: Server.BUILT
+    }
+    val api by lazy { DjTrotApi(server.url) }
+    // 🔑 빌드가 정한 서버가 아니면 자격 보관함과 음성 팩 폴더를 따로 쓴다 — 서버마다 계정과 팩이 다르다.
+    val account by lazy { DeviceAccount(api, if (server == Server.BUILT) DeviceVault(this) else DeviceVault(this, "djtrot_device_${server.name.lowercase()}")) }
+    private val packRoot: File get() = if (server == Server.BUILT) filesDir else File(filesDir, "server-${server.name.lowercase()}")
+
+    /** 개발자 모드 — 앱 정보에서 버전을 여러 번 누르면 켜진다. 기기에만 저장한다. */
+    var developer: Boolean
+        get() = getSharedPreferences(PREFS, MODE_PRIVATE).getBoolean(KEY_DEVELOPER, false)
+        set(value) { getSharedPreferences(PREFS, MODE_PRIVATE).edit { putBoolean(KEY_DEVELOPER, value) } }
+
+    /** 서버에 마지막으로 멘트를 청한 기록 — 개발자 모드가 "왜 이 멘트가 나왔나"를 보여 준다. 기기 밖으로 나가지 않는다. */
+    val lastBrief = MutableStateFlow<BriefTrace?>(null)
+
+    /**
+     * 받아 둔 것을 지우고 처음 상태로 돌아간다 — 지금 서버의 DJ 음성 팩과 DJ 설정(멘트 켜기·간격·음악 크기·고른 DJ).
+     * 🔑 휴대폰 연결(기기 자격)과 개발자 모드·서버 선택은 그대로 둔다. 끝나면 앱을 다시 시작한다.
+     */
+    fun resetData() {
+        packRoot.listFiles { file -> file.isDirectory && file.name.startsWith("voice-pack") }?.forEach { it.deleteRecursively() }
+        getSharedPreferences(PREFS, MODE_PRIVATE).edit(commit = true) { remove(KEY_TALKS).remove(KEY_FULL_EVERY).remove(KEY_DUCK).remove(KEY_DJ) }
+        restart()
+    }
+
+    private fun restart() {
+        packageManager.getLaunchIntentForPackage(packageName)?.let { startActivity(it.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)) }
+        Runtime.getRuntime().exit(0)
+    }
+
+    /**
+     * 서버를 바꾸고 앱을 다시 시작한다.
+     * 🔴 재생 중이던 노래와 진행 중이던 시연은 끊긴다. 개발자 모드에서만 부른다.
+     */
+    fun switchServer(next: Server) {
+        if (next == server) return
+        getSharedPreferences(PREFS, MODE_PRIVATE).edit(commit = true) { putString(KEY_SERVER, next.name) }
+        restart()
+    }
     val catalog by lazy { Catalog(api, account) }
     val orders by lazy { SongOrders(api, account, catalog, scope) }
+
+    /** 광고 — 장소에 맞는 광고 음악과 생성권 진행. */
+    val ads by lazy { Ads(api, account, scope) }
+
+    /** 시뮬레이션이 "이 광고의 장소에 가까워졌다"고 재생 서비스에 보내는 신호(광고 ID). */
+    val adCues = MutableSharedFlow<String>(extraBufferCapacity = 1)
+
+    /**
+     * 시뮬레이션 — 그 광고의 조건에 맞는 장소를 덧씌우고 광고를 바로 틀게 한다.
+     * 🔑 조건의 첫 번째(낱말 → 목적지 종류 → 좌표)로 장소를 만든다. 쉬는 시간은 보지 않는다.
+     */
+    fun demoAd(ad: Ad) {
+        val before = demo.value ?: DemoDrive()
+        val conditions = ad.conditions
+        val next = when {
+            conditions.keywords.isNotEmpty() -> before.road().copy(address = "${conditions.keywords.first()} 앞")
+            conditions.destinationWords.isNotEmpty() -> before.road().copy(destination = Destination("${conditions.destinationWords.first()} 본점", remainMinutes = 5, remainKm = 2.0))
+            conditions.places.isNotEmpty() -> conditions.places.first().let { before.road().copy(location = GeoPoint(it.latitude, it.longitude), address = it.name.ifBlank { null } ?: before.address) }
+            else -> before
+        }
+        demo.value = next
+        car.stage(next::apply)
+        adCues.tryEmit(ad.id)
+    }
     val car by lazy { CarSignals(this) }
     val voice: DjVoice by lazy { FallbackDjVoice(this) }
     /** 받아 둔 DJ 음성 조각 — 서버가 닿지 않을 때와 출발·도착 인사에 쓴다. */
-    val voicePack by lazy { VoicePackStore(File(filesDir, "voice-pack"), api::voicePack, api::download) }
+    val voicePack: VoicePackStore get() = pack(djId.value)
+
+    /** 고를 수 있는 DJ — 서버 설정이 알려 준다. 받기 전이나 예전 서버면 기본 DJ 하나다. */
+    val djs = MutableStateFlow(listOf(DjInfo.DEFAULT))
+
+    /** 지금 고른 DJ의 ID. 기기에만 저장한다. */
+    val djId by lazy { MutableStateFlow(getSharedPreferences(PREFS, MODE_PRIVATE).getString(KEY_DJ, null) ?: DjInfo.DEFAULT_ID) }
+
+    /** 지금 고른 DJ. 목록에 없으면(서버가 내렸다) 기본 DJ. */
+    val djInfo: DjInfo get() = djs.value.firstOrNull { it.id == djId.value } ?: DjInfo.DEFAULT
+
+    private val packs = ConcurrentHashMap<String, VoicePackStore>()
+
+    /** 그 DJ의 받아 둔 음성 팩 — DJ마다 폴더가 따로다. 기본 DJ는 예전 폴더를 그대로 쓴다. */
+    private fun pack(id: String): VoicePackStore = packs.getOrPut(id) {
+        VoicePackStore(File(packRoot, if (id == DjInfo.DEFAULT_ID) "voice-pack" else "voice-pack-$id"), { api.voicePack(id) }, api::download)
+    }
+
+    /**
+     * DJ를 바꾼다 — 다음 멘트부터 그 DJ가 말한다. 준비되지 않은 DJ는 고를 수 없다.
+     * 🔑 그 DJ의 음성 팩을 바로 받기 시작한다. 받는 동안은 서버가 주는 음성 주소로 튼다.
+     */
+    fun selectDj(id: String) {
+        if (djs.value.none { it.id == id && it.ready }) return
+        djId.value = id
+        getSharedPreferences(PREFS, MODE_PRIVATE).edit { putString(KEY_DJ, id) }
+        syncVoicePack()
+    }
+
+    /** 서버 설정을 받았다 — 선택지 이름과 DJ 목록을 갈아 끼운다. 고른 DJ가 준비되지 않았으면 기본 DJ로 돌아간다. */
+    private fun configured(config: DjConfig) {
+        Labels.update(config)
+        djs.value = config.djs.ifEmpty { listOf(DjInfo.DEFAULT) }
+        if (djs.value.none { it.id == djId.value && it.ready }) djId.value = DjInfo.DEFAULT_ID
+    }
     val dj = MutableStateFlow(DjState())
     val mic by lazy { StoryMic(this, ::wish) }
 
@@ -189,8 +328,9 @@ class DjTrotApp : Application() {
         scope.launch {
             account.connection.collect { connection ->
                 val token = if (connection is Connection.Connected) runCatching { account.token() }.getOrNull() else null
-                runCatching { api.config(token) }.onSuccess(Labels::update)
+                runCatching { api.config(token) }.onSuccess(::configured)
                 if (token != null) orders.refreshTokens()
+                ads.refresh()
             }
         }
     }
@@ -219,5 +359,8 @@ class DjTrotApp : Application() {
         private const val KEY_TALKS = "dj_talks"
         private const val KEY_FULL_EVERY = "dj_full_every"
         private const val KEY_DUCK = "dj_duck"
+        private const val KEY_DJ = "dj_id"
+        private const val KEY_SERVER = "server"
+        private const val KEY_DEVELOPER = "developer"
     }
 }

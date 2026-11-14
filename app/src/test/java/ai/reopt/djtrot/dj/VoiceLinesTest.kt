@@ -51,7 +51,7 @@ class VoiceLinesTest {
 
     @Test fun `제목 없는 곡 소개`() {
         val seed = VoiceLines.seedOf("고향 가는 길\n마스터트롯 악단")
-        assertEquals("play.2", VoiceLines.genericPlayId(SongInfo("고향 가는 길", "마스터트롯 악단"), seed))
+        assertEquals("play.5", VoiceLines.genericPlayId(SongInfo("고향 가는 길", "마스터트롯 악단"), seed))
         assertEquals("play.request.fresh", VoiceLines.genericPlayId(SongInfo("a", "DJ 트롯", requested = true, fresh = true), seed))
         assertEquals("play.request.old", VoiceLines.genericPlayId(SongInfo("a", "DJ 트롯", requested = true), seed))
     }

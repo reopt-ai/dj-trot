@@ -56,6 +56,14 @@ class ContractTest {
     @Test fun `멘트 길이와 날씨는 정해졌을 때만 보낸다`() {
         val plain = json.encodeToString(BriefRequest.serializer(), BriefRequest(DriveContext().toInput(LocalTime.NOON), voice = false))
         assertFalse("ment" in plain)
+        // DJ를 정하지 않으면 보내지 않고(서버가 기본 DJ로 답한다), 고르면 그 ID를 보낸다.
+        assertFalse("\"dj\"" in plain)
+        val mari = json.encodeToString(BriefRequest.serializer(), BriefRequest(DriveContext().toInput(LocalTime.NOON), voice = true, dj = "mari"))
+        assertTrue("\"dj\":\"mari\"" in mari)
+        // 서버 설정의 DJ 목록 — 없으면(예전 서버) 빈 목록이다.
+        val config = json.decodeFromString(DjConfig.serializer(), """{"djs":[{"id":"hwanggu","name":"DJ 황","description":"다방 DJ","ready":true},{"id":"mari","name":"DJ 마리","ready":false}]}""")
+        assertEquals(listOf("hwanggu" to true, "mari" to false), config.djs.map { it.id to it.ready })
+        assertTrue(json.decodeFromString(DjConfig.serializer(), "{}").djs.isEmpty())
         assertFalse("weather" in plain)
         assertFalse("scene" in plain)
         // 🔴 즐겨찾기의 집·회사는 서버로 가지 않는다.

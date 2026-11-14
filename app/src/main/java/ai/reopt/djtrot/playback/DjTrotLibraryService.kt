@@ -1,6 +1,10 @@
 package ai.reopt.djtrot.playback
 
+import ai.reopt.djtrot.BriefTrace
 import ai.reopt.djtrot.DjTrotApp
+import ai.reopt.djtrot.api.Ad
+import ai.reopt.djtrot.api.BriefRequest
+import ai.reopt.djtrot.api.DjTrotApi
 import ai.reopt.djtrot.api.NowPlaying
 import ai.reopt.djtrot.dj.DjScript
 import ai.reopt.djtrot.dj.SongInfo
@@ -47,6 +51,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.guava.future
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.serialization.json.Json
 
 /**
  * DJ 트롯 재생 서비스 — Pleos Music/Audio 카테고리 요건을 이 한 곳에서 지킨다.
@@ -67,6 +72,12 @@ class DjTrotLibraryService : MediaLibraryService() {
     private val catalog get() = app.catalog
 
     private var announced: String? = null
+
+    /** 대기열에 끼워 둔 광고의 ID — 나오기 전에 같은 광고를 또 끼우지 않는다. */
+    private var queuedAd: String? = null
+
+    /** 지금 나오는 광고. 끝까지 들으면 서버에 알린다. */
+    private var playingAd: Ad? = null
     /** 이번 재생 목록에서 DJ가 소개한 곡 수 — 설정의 간격([DjTrotApp.fullEvery])마다만 길게 말한다. */
     private var introduced = 0
     private var briefJob: Job? = null
@@ -101,6 +112,21 @@ class DjTrotLibraryService : MediaLibraryService() {
             .setSessionActivity(openApp)
             .build()
         app.car.start()
+        // 🔑 광고 — 광고 조건에 맞는 장소에 가까워지면 광고 음악을 지금 곡 다음에 끼운다. 장소 판단은 기기 안에서 한다.
+        //    노래가 나오는 중일 때만 끼우고(자동 재생 금지), 어린이보호구역에서는 끼우지 않는다.
+        scope.launch {
+            app.car.state.collect { drive ->
+                if (!player.isPlaying || drive.schoolZone || queuedAd != null) return@collect
+                queueAd(app.ads.due(drive) ?: return@collect)
+            }
+        }
+        // 시뮬레이션의 광고 버튼 — 쉬는 시간을 보지 않고 그 광고를 바로 다음 곡으로 끼운다.
+        scope.launch {
+            app.adCues.collect { id ->
+                if (!player.isPlaying) return@collect
+                queueAd(app.ads.list.value.firstOrNull { it.id == id } ?: return@collect)
+            }
+        }
         // 신청한 노래가 완성되면 지금 곡 다음에 넣고 DJ가 알린다.
         scope.launch {
             app.orders.ready.collect { song ->
@@ -186,11 +212,59 @@ class DjTrotLibraryService : MediaLibraryService() {
      *    통문장 음성(voiceUrl)은 멘트가 이 곡을 말할 때만 튼다 — 곡 소개를 기기 TTS로 덧붙이면 두 목소리가 섞인다.
      *    음성은 전주 위에 음악을 줄이고 얹는다(라디오 진행처럼). 곡을 미리 멈추면 시작이 늦어진다.
      * 🔑 길게 말하는 것은 첫 곡과 그 뒤 설정의 간격([DjTrotApp.fullEvery], 기본 세 곡)마다다. 나머지와 어린이보호구역에서는 곡 소개만 한다.
-     * 🔑 [demo] — 시연 버튼이 불렀다. 같은 곡을 다시 소개하고, 길게 말하며, 분위기 장면도 곡을 가리지 않고 쓴다.
+     * 🔑 [demo] — 시뮬레이션 버튼이 불렀다. 노래가 이미 나오는 중이라 곡 소개는 하지 않고 바뀐 상황의 말만 하며, 분위기 장면도 곡을 가리지 않고 쓴다.
+     *    어린이보호구역만 예외로 곡 이름만 말한다(그 규칙을 보여 주려는 것이다).
      * 🔑 여는 말을 받아 둔 조각으로 낼 수 있으면 서버에는 곡 소개만 청한다 — 집·회사·동승자처럼 차만 아는 것으로 고른 말을 쓰려는 것이다.
      */
+    /**
+     * 광고 음악을 지금 곡 다음에 끼운다. 같은 광고가 이미 대기 중이면 다시 넣지 않는다.
+     * 🔑 지금 곡을 끊지 않는다 — 곡이 끝나면 광고가 나오고, 광고가 끝나면 하던 목록으로 돌아간다.
+     */
+    private fun queueAd(ad: Ad) {
+        if (queuedAd == ad.id || player.mediaItemCount == 0) return
+        val item = catalog.ad(ad.song)
+        player.addMediaItem(player.currentMediaItemIndex + 1, item)
+        queuedAd = ad.id
+        app.ads.queued(ad)
+        app.dj.update { it.say("이 근처 소식이 있어요. 다음 곡으로 '${ad.title}' 광고를 들려 드릴게요.") }
+    }
+
+    /**
+     * 곡이 바뀌었다 — 광고가 시작됐는지, 방금 광고를 끝까지 들었는지 본다.
+     * 🔑 끝까지 들은 것만 센다: 광고에서 다음 곡으로 **저절로** 넘어갔을 때([Player.MEDIA_ITEM_TRANSITION_REASON_AUTO]). 건너뛰면 세지 않는다.
+     */
+    private fun trackAd(next: MediaItem?, reason: Int) {
+        val finished = playingAd
+        val nextAd = app.ads.adOf(next?.mediaMetadata?.extras?.getString(Catalog.EXTRA_SONG_ID))
+        playingAd = nextAd
+        if (nextAd != null && queuedAd == nextAd.id) queuedAd = null
+        if (finished != null && reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO) heardAd(finished)
+    }
+
+    /** 광고를 끝까지 들었다 — 서버에 알리고, 생성권이 생겼으면 화면에 알린다. */
+    private fun heardAd(ad: Ad) {
+        scope.launch {
+            val progress = app.ads.heard(ad) ?: return@launch
+            val line = when {
+                progress.granted -> "광고를 ${progress.needed}번 들어서 생성권 한 장이 생겼어요!"
+                progress.capped -> "생성권이 가득 찼어요. 노래를 만들면 광고로 다시 받을 수 있어요."
+                else -> "광고 ${progress.progress}/${progress.needed} · ${progress.needed - progress.progress}번 더 들으면 생성권 한 장이에요."
+            }
+            app.dj.update { it.say(line) }
+            if (progress.granted) app.orders.refreshTokens()
+        }
+    }
+
     private fun announce(item: MediaItem?, demo: Boolean = false) {
         if (item == null || !app.djTalks) return
+        // 광고 음악은 DJ가 소개하지 않는다 — 화면에 광고임을 알리기만 한다.
+        app.ads.adOf(item.mediaMetadata.extras?.getString(Catalog.EXTRA_SONG_ID))?.let { ad ->
+            if (item.mediaId != announced) {
+                announced = item.mediaId
+                app.dj.update { it.say("광고 · ${ad.title}") }
+            }
+            return
+        }
         if (item.mediaId == announced) return refreshSuggestion(item)
         announced = item.mediaId
         val meta = item.mediaMetadata
@@ -213,14 +287,39 @@ class DjTrotLibraryService : MediaLibraryService() {
         app.syncVoicePack()
         val pick = VoiceLines.seedOf(song)
         // 받아 둔 조각으로 낼 여는 말. 하나라도 빠졌으면 서버가 고른 것을 쓴다.
-        val lead = if (full) VoiceLines.leadIds(drive, now.hour, pick, always = demo).map(app.voicePack::fragment) else emptyList()
+        val leadIds = if (full) VoiceLines.leadIds(drive, now.hour, pick, always = demo) else emptyList()
+        val lead = leadIds.map(app.voicePack::fragment)
         val ownLead = lead.isNotEmpty() && lead.all { it != null }
+        // 🔑 시뮬레이션 버튼 — 노래는 이미 나오는 중이다. 곡 소개를 되풀이하지 않고 바뀐 상황의 말만 한다.
+        //    받아 둔 조각으로 낼 수 있으면 서버에 묻지 않고, 아니면 서버에 상황의 말만 청한다(ment=lead).
+        if (demo && ownLead) {
+            val parts = lead.filterNotNull()
+            val line = parts.joinToString(" ") { it.text }
+            app.dj.update { it.say(line, now).copy(problem = null) }
+            app.lastBrief.value = BriefTrace(LocalTime.now(), request = null, response = line, local = leadIds)
+            briefJob?.cancel()
+            briefJob = scope.launch { talk(line, item.mediaId, clips = parts.map { it.file.toUri().toString() }) }
+            return
+        }
         briefJob?.cancel()
         briefJob = scope.launch {
-            val ment = if (full && !ownLead) "full" else "short"
-            val brief = runCatching { app.api.brief(drive.toInput(now, app.spoken, pick, always = demo), voice = true, nowPlaying = nowPlaying, ment = ment, token = app.account.cachedToken()) }
+            val ment = when {
+                demo && full -> "lead"
+                full && !ownLead -> "full"
+                else -> "short"
+            }
+            val input = drive.toInput(now, app.spoken, pick, always = demo)
+            val attempt = runCatching { app.api.brief(input, voice = true, nowPlaying = nowPlaying, ment = ment, token = app.account.cachedToken(), dj = app.djId.value) }
                 .onFailure { Log.i(TAG, "DJ 브리프 대신 기기 멘트: ${it.message}") }
-                .getOrNull()
+            val brief = attempt.getOrNull()
+            // 개발자 모드가 보여 주는 기록 — 무엇을 보내고 무엇을 받았는가.
+            app.lastBrief.value = BriefTrace(
+                at = LocalTime.now(),
+                request = PRETTY.encodeToString(BriefRequest.serializer(), BriefRequest(input, voice = true, nowPlaying = nowPlaying, ment = ment, dj = app.djId.value)),
+                response = brief?.let { "${it.script}\n음성 조각 ${it.voiceClips.size}개 · ${if (it.voiceUrl != null) "통문장 음성 있음 · " else ""}출처 ${it.source}" }
+                    ?: "받지 못했어요 · ${attempt.exceptionOrNull()?.message ?: "알 수 없는 오류"}",
+                local = leadIds.takeIf { ownLead }.orEmpty(),
+            )
             if (player.currentMediaItem?.mediaId != item.mediaId) return@launch
             // 🔑 브리프를 기다리는 사이 멈췄으면 말하지 않는다. 다시 틀 때 새로 소개한다.
             if (!player.isPlaying) {
@@ -388,6 +487,14 @@ class DjTrotLibraryService : MediaLibraryService() {
     }
 
     private inner class PlayerEvents : Player.Listener {
+        override fun onPlaybackStateChanged(playbackState: Int) {
+            // 광고가 목록의 마지막 곡이었으면 다음 곡으로 넘어가는 일이 없다 — 재생이 끝난 것으로 끝까지 들었다고 본다.
+            if (playbackState == Player.STATE_ENDED) playingAd?.let { ad ->
+                playingAd = null
+                heardAd(ad)
+            }
+        }
+
         override fun onIsPlayingChanged(isPlaying: Boolean) {
             if (!isPlaying) return
             failuresInRow = 0
@@ -396,6 +503,7 @@ class DjTrotLibraryService : MediaLibraryService() {
         }
 
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+            trackAd(mediaItem, reason)
             app.orders.onStage(mediaItem?.mediaMetadata?.extras?.getString(Catalog.EXTRA_SONG_ID))
             if (player.isPlaying) announce(mediaItem)
         }
@@ -553,6 +661,9 @@ class DjTrotLibraryService : MediaLibraryService() {
 
     private companion object {
         const val TAG = "DjTrotPlayback"
+
+        /** 개발자 모드의 요청 기록을 읽기 쉽게 쓰는 JSON. */
+        val PRETTY = Json(DjTrotApi.json) { prettyPrint = true }
         /** 멘트 조각 사이의 숨(마이크로초). */
         const val CLIP_GAP_US = 350_000L
 

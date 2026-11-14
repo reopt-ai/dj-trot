@@ -17,8 +17,9 @@ import javax.crypto.spec.GCMParameterSpec
  * 🔴 자격은 페어링 때 한 번만 온다. 잃으면 다시 연결해야 하고, 새면 남이 그 계정으로 노래를 만든다.
  *    그래서 Android Keystore의 AES-GCM 키로 암호화해 앱 전용 설정에 둔다(키는 기기 밖으로 나가지 않는다).
  */
-class DeviceVault(context: Context) {
-    private val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+class DeviceVault(context: Context, name: String = PREFS) {
+    // 🔑 [name] — 서버마다 자격이 다르다. 개발자 모드로 다른 서버를 볼 때는 다른 보관함을 쓴다(한쪽의 자격이 다른 쪽에서 철회로 지워지지 않게).
+    private val prefs = context.getSharedPreferences(name, Context.MODE_PRIVATE)
 
     fun read(): DeviceCredential? {
         val id = prefs.getString(KEY_ID, null) ?: return null

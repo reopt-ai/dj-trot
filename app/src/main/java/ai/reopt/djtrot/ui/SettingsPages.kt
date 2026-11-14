@@ -1,8 +1,15 @@
 package ai.reopt.djtrot.ui
 
 import ai.reopt.djtrot.BuildConfig
+import androidx.annotation.DrawableRes
+import androidx.compose.foundation.Image
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
+import androidx.compose.foundation.layout.fillMaxSize
 import ai.reopt.djtrot.DjTrotApp
+import ai.reopt.djtrot.Server
 import ai.reopt.djtrot.account.Connection
+import ai.reopt.djtrot.api.DjInfo
 import ai.reopt.djtrot.car.DriveContext
 import ai.reopt.djtrot.car.SignalBoard
 import ai.reopt.djtrot.car.SignalSource
@@ -13,6 +20,7 @@ import ai.reopt.djtrot.dj.pauseSeconds
 import android.content.Intent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -56,7 +64,7 @@ import kotlinx.coroutines.launch
  * 설정 메뉴의 한 줄 — 아이콘, 이름과 작은 배지, 한 줄 설명. 메뉴는 한 줄에 하나씩 쌓는다.
  */
 @Composable
-internal fun SettingsTile(icon: ImageVector, title: String, description: String, badge: String?, active: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
+internal fun SettingsTile(icon: ImageVector, title: String, description: String, badge: String?, active: Boolean, modifier: Modifier = Modifier, @DrawableRes avatar: Int? = null, onClick: () -> Unit) {
     val source = remember { MutableInteractionSource() }
     val shape = RoundedCornerShape(24.dp)
     Row(
@@ -70,9 +78,10 @@ internal fun SettingsTile(icon: ImageVector, title: String, description: String,
             .padding(horizontal = 24.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        // 아이콘 받침 — 테 없이 은은한 원만 둔다.
+        // 아이콘 받침 — 테 없이 은은한 원만 둔다. DJ처럼 얼굴 그림이 있으면 원을 그림으로 채운다.
         Box(Modifier.size(76.dp).clip(CircleShape).background(DjColors.Cream), contentAlignment = Alignment.Center) {
-            Icon(icon, contentDescription = null, tint = DjColors.Gold2, modifier = Modifier.size(40.dp))
+            if (avatar != null) Image(painterResource(avatar), contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+            else Icon(icon, contentDescription = null, tint = DjColors.Gold2, modifier = Modifier.size(40.dp))
         }
         Spacer(Modifier.width(20.dp))
         Column(Modifier.weight(1f)) {
@@ -175,12 +184,28 @@ internal fun ColumnScope.SignalsPage(drive: DriveContext) {
     }
 }
 
-/** DJ 설정 — 멘트 켜기·끄기, 길게 말하는 간격, 멘트 중 음악 크기. 값은 기기에만 저장한다. */
+/**
+ * DJ 설정 — DJ 고르기, 멘트 켜기·끄기, 길게 말하는 간격, 멘트 중 음악 크기. 값은 기기에만 저장한다.
+ * 🔑 DJ마다 목소리와 말투가 다르다. 서버에 음성 팩이 준비된 DJ만 고를 수 있다.
+ */
 @Composable
-internal fun ColumnScope.DjSettingsPage(app: DjTrotApp, talks: Boolean, onToggleTalks: () -> Unit) {
+internal fun ColumnScope.DjSettingsPage(app: DjTrotApp, djs: List<DjInfo>, djId: String, talks: Boolean, onToggleTalks: () -> Unit) {
     var every by remember { mutableIntStateOf(app.fullEvery) }
     var duck by remember { mutableFloatStateOf(app.duckLevel) }
     Column(Modifier.weight(1f).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        GroupTitle("DJ 고르기", DjIcons.Disc)
+        djs.forEach { dj ->
+            SettingsTile(
+                DjIcons.Mic,
+                dj.name,
+                if (dj.ready) dj.description else "${dj.description} · 준비 중이에요",
+                badge = if (dj.id == djId) "진행 중" else null,
+                active = dj.id == djId,
+                modifier = Modifier.fillMaxWidth(),
+                avatar = Art.dj(dj.id),
+            ) { app.selectDj(dj.id) }
+        }
+        Note("다음 멘트부터 고른 DJ가 말해요. 처음 고르면 그 DJ의 멘트를 받아 둬요.")
         GroupTitle("DJ 멘트", DjIcons.Mic)
         Choices(listOf(true to "켜기", false to "끄기"), talks) { if (it != talks) onToggleTalks() }
         Note(if (talks) "곡이 시작될 때 DJ가 소개해요." else "DJ가 말하지 않고 노래만 이어져요.")
@@ -240,10 +265,26 @@ internal fun ColumnScope.AboutPage(app: DjTrotApp) {
     var lineCount by remember { mutableIntStateOf(app.voicePack.fragments().size) }
     var syncing by remember { mutableStateOf(false) }
     var result by remember { mutableStateOf<String?>(null) }
+    // 개발자 모드 — 버전을 [DEVELOPER_TAPS]번 누르면 켜진다. 서버를 바꾸고 연결을 확인한다.
+    var developer by remember { mutableStateOf(app.developer) }
+    var taps by remember { mutableIntStateOf(0) }
+    var chosen by remember { mutableStateOf(app.server) }
+    var checking by remember { mutableStateOf(false) }
+    var checked by remember { mutableStateOf<String?>(null) }
+    var resetting by remember { mutableStateOf(false) }
+    val trace by app.lastBrief.collectAsStateWithLifecycle()
     Column(Modifier.weight(1f).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         GroupTitle("DJ 트롯", DjIcons.Disc)
-        InfoRow("버전", BuildConfig.VERSION_NAME, strong = true)
-        InfoRow("서버", runCatching { java.net.URI(BuildConfig.DJ_TROT_API).host }.getOrNull() ?: "알 수 없음", strong = false)
+        InfoRow("버전", BuildConfig.VERSION_NAME, strong = true) {
+            if (developer) return@InfoRow
+            taps += 1
+            if (taps >= DEVELOPER_TAPS) {
+                developer = true
+                app.developer = true
+            }
+        }
+        if (!developer && taps in 3 until DEVELOPER_TAPS) Note("개발자 모드까지 ${DEVELOPER_TAPS - taps}번 남았어요.")
+        InfoRow("서버", "${app.server.label} · ${hostOf(app.server.url)}", strong = false)
         InfoRow("플랫폼", "Pleos Connect · Android Automotive", strong = false)
         GroupTitle("DJ 멘트", DjIcons.Mic)
         InfoRow("받아 둔 멘트", if (lineCount > 0) "${lineCount}개" else "아직 없음", strong = lineCount > 0)
@@ -259,6 +300,62 @@ internal fun ColumnScope.AboutPage(app: DjTrotApp) {
             }
         }
         result?.let { Note(it) }
+        if (developer) {
+            GroupTitle("개발자 모드", DjIcons.Settings)
+            Choices(Server.entries.sortedBy { it.production }.map { it to it.label }, chosen) { chosen = it }
+            Note("${chosen.label} 서버 · ${chosen.url}")
+            // 🔑 로컬 서버는 평문(HTTP)이라 디버그 빌드에서만 닿는다.
+            val blocked = !BuildConfig.DEBUG && chosen.url.startsWith("http://")
+            if (blocked) Note("이 빌드에서는 평문(HTTP) 로컬 서버에 연결할 수 없어요. 디버그 빌드에서 써 주세요.")
+            if (chosen != app.server && !blocked) {
+                PillButton("${chosen.label} 서버로 다시 시작", "서버를 바꾸고 앱을 다시 시작해요", selected = true, Modifier.fillMaxWidth(), height = 84.dp, icon = DjIcons.Refresh) { app.switchServer(chosen) }
+                Note("앱이 다시 시작돼요. 재생 중인 노래는 멈추고, 휴대폰 연결과 DJ 멘트는 서버마다 따로 보관해요.")
+            }
+            PillButton(if (checking) "확인하는 중…" else "지금 서버 연결 확인", "지금 보는 서버가 답하는지 확인해요", selected = false, Modifier.fillMaxWidth(), height = 80.dp) {
+                if (checking) return@PillButton
+                checking = true
+                checked = null
+                scope.launch {
+                    val started = System.currentTimeMillis()
+                    checked = runCatching { app.api.config() }.fold(
+                        onSuccess = { config -> "연결됨 · ${System.currentTimeMillis() - started}ms · 준비된 DJ ${config.djs.count { it.ready }}명" },
+                        onFailure = { "연결하지 못했어요 · ${it.message ?: it.javaClass.simpleName}" },
+                    )
+                    checking = false
+                }
+            }
+            checked?.let { Note(it) }
+            GroupTitle("마지막 DJ 요청", DjIcons.Mic)
+            trace.let { last ->
+                if (last == null) Note("아직 없어요. 노래가 시작되거나 시뮬레이션 버튼을 누르면 여기에 남아요.")
+                else Column(Modifier.fillMaxWidth().djCard(radius = 16.dp).padding(horizontal = 24.dp, vertical = 20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    TraceBlock("언제", last.at.format(TRACE_TIME))
+                    TraceBlock("서버에 보낸 것", last.request ?: "서버에 묻지 않았어요 — 받아 둔 조각으로 말했어요.")
+                    TraceBlock("받은 것", last.response)
+                    if (last.local.isNotEmpty()) TraceBlock("기기가 고른 조각", last.local.joinToString(" → "))
+                }
+            }
+            GroupTitle("빌드", DjIcons.Note)
+            InfoRow("커밋", BuildConfig.GIT_COMMIT.ifEmpty { "알 수 없음" }, strong = false)
+            InfoRow("빌드한 때", BuildConfig.BUILD_TIME, strong = false)
+            InfoRow("빌드 종류", if (BuildConfig.DEBUG) "디버그" else "릴리스", strong = false)
+            GroupTitle("초기화", DjIcons.Refresh)
+            if (!resetting) {
+                PillButton("받아 둔 데이터 지우기", "DJ 멘트 팩과 DJ 설정을 지우고 처음 상태로 돌아가요", selected = false, Modifier.fillMaxWidth(), height = 80.dp) { resetting = true }
+            } else {
+                Note("받아 둔 DJ 멘트와 DJ 설정(멘트 켜기·간격·음악 크기·고른 DJ)을 지우고 앱을 다시 시작해요. 휴대폰 연결은 그대로예요.")
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    PillButton("지우고 다시 시작", "지우고 앱을 다시 시작해요", selected = true, Modifier.weight(1f), height = 80.dp) { app.resetData() }
+                    PillButton("취소", "지우지 않아요", selected = false, Modifier.weight(1f), height = 80.dp) { resetting = false }
+                }
+            }
+            GroupTitle("개발자 모드 닫기", DjIcons.Settings)
+            PillButton("개발자 모드 끄기", "개발자 모드를 숨겨요", selected = false, Modifier.fillMaxWidth(), height = 72.dp) {
+                developer = false
+                app.developer = false
+                taps = 0
+            }
+        }
         GroupTitle("오픈소스", DjIcons.Note)
         Note("Jetpack Compose · AndroidX Media3 · Kotlin Coroutines · kotlinx.serialization · OkHttp (Apache License 2.0)")
         Note("아이콘 — Material Symbols (Apache License 2.0)")
@@ -276,10 +373,32 @@ private fun <T> Choices(options: List<Pair<T, String>>, selected: T, onSelect: (
     }
 }
 
-/** 이름과 값 한 줄. */
+private val TRACE_TIME: java.time.format.DateTimeFormatter = java.time.format.DateTimeFormatter.ofPattern("HH:mm:ss")
+
+/** 요청 기록의 한 덩이 — 작은 이름과 그 아래 내용(줄바꿈을 그대로 보인다). */
 @Composable
-private fun InfoRow(label: String, value: String, strong: Boolean) {
-    Row(Modifier.fillMaxWidth().height(80.dp).djCard(radius = 16.dp).padding(horizontal = 26.dp), verticalAlignment = Alignment.CenterVertically) {
+private fun TraceBlock(label: String, value: String) {
+    Column {
+        Text(label, style = body(DjType.LabelM, DjColors.Gold, FontWeight.Bold))
+        Text(value, style = body(DjType.LabelM, DjColors.Ink))
+    }
+}
+
+/** 개발자 모드를 켜려면 버전을 눌러야 하는 횟수. */
+private const val DEVELOPER_TAPS = 7
+
+private fun hostOf(url: String): String = runCatching { java.net.URI(url).let { uri -> if (uri.port > 0) "${uri.host}:${uri.port}" else uri.host } }.getOrNull() ?: "알 수 없음"
+
+/** 이름과 값 한 줄. [onClick]이 있으면 누를 수 있다(누르는 표시는 내지 않는다 — 숨은 동작용). */
+@Composable
+private fun InfoRow(label: String, value: String, strong: Boolean, onClick: (() -> Unit)? = null) {
+    val source = remember { MutableInteractionSource() }
+    Row(
+        Modifier.fillMaxWidth().height(80.dp).djCard(radius = 16.dp)
+            .then(if (onClick != null) Modifier.clickable(interactionSource = source, indication = null, onClick = onClick) else Modifier)
+            .padding(horizontal = 26.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
         Text(label, style = body(DjType.BodyM, DjColors.Muted), maxLines = 1)
         Spacer(Modifier.width(16.dp))
         Text(
