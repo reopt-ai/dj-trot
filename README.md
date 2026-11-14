@@ -181,6 +181,26 @@ uv run --no-project tools/mock_djtrot.py --audio-dir ~/Music/trot --upstream htt
 
 `--fake-songs 45`를 더하면 노래 만들기 요청을 서버로 보내지 않고, 45초 동안 만드는 중으로 답한 뒤 이 계정이 이미 만든 노래로 완성합니다. 노래 만들기는 토큰과 서버 비용이 드니, 화면 확인과 시연 연습은 이 모드로 합니다.
 
+### 차량 신호 흉내 내기
+
+에뮬레이터는 정체, 터널·휴게소, 와이퍼, 동승자, 달린 시간 같은 값을 주지 않고 마이크 인식도 되지 않습니다. `tools/trigger.py`는 디버그 빌드에만 있는 수신기에 adb 브로드캐스트를 보내 이 신호를 실제 값 위에 덧씌우고, 그 신호로 기기 DJ가 할 말과 서버로 가는 맥락을 찍어 줍니다. 파이썬 표준 라이브러리와 adb만 씁니다.
+
+```bash
+uv run --no-project tools/trigger.py keys                                   # 쓸 수 있는 키와 시나리오
+uv run --no-project tools/trigger.py set gear=DRIVE rain=on jam=12 --next   # 신호를 덧씌우고 다음 곡으로 넘겨, DJ가 실제로 한 말을 찍는다
+uv run --no-project tools/trigger.py depart 강릉역 --min 150 --km 210       # 길 안내 시작(waypoint, arrive도 같은 모양)
+uv run --no-project tools/trigger.py say "어머니 생신이라 고향 가는 길이에요"  # 마이크 대신 말로 넣는 사연
+uv run --no-project tools/trigger.py scenario trip --step 20 --next         # 정해 둔 길(trip, home, wander)을 차례로
+uv run --no-project tools/trigger.py watch                                  # DJ가 실제로 하는 말을 나오는 대로
+uv run --no-project tools/trigger.py clear                                  # 모두 실제 값으로
+```
+
+결과에는 지금 신호로 번갈아 나올 곡 소개 두 가지, 뒤로 밀려 나오지 않는 말, 재생 상태, DJ가 실제로 마지막에 한 말이 함께 찍힙니다.
+
+- 곡 소개 멘트는 곡이 바뀔 때 나옵니다. 출발·경유지·도착 한마디는 노래가 나오는 중이고 DJ 멘트가 켜져 있을 때만 나오고, 아니면 결과에 ⚠️로 알립니다. 첫 재생은 화면의 시작 버튼으로 켭니다(자동 재생 금지).
+- 서버가 닿으면 서버 DJ 브리프가 먼저입니다. 기기 멘트를 들으려면 서버가 닿지 않게 하고(목 서버를 끄거나 없는 주소로 설치) 시험합니다.
+- 덧씌운 값은 앱 프로세스가 끝나면 사라집니다. `say`는 앱이 평소 하듯 DJ 브리프를 한 번 부르고, 노래 만들기는 부르지 않습니다.
+
 ## 테스트
 
 ```bash
@@ -219,8 +239,10 @@ app/src/main/java/ai/reopt/djtrot/
 ├── dj/              DJ: 목소리(DjVoice), 노래 주문(SongOrders), 오프라인 멘트·사연(DjScript, StoryBuilder)
 ├── playback/        재생: Media3 서비스(DjTrotLibraryService), 브라우즈 트리·검색·큐(Catalog)
 └── ui/              화면: 무대(DjScreen), 신청곡·노래 목록(Shelf), 휴대폰 연결(ConnectActivity), 공통 부품
-app/src/test/        JVM 단위 테스트
+app/src/debug/       디버그 빌드에만 들어가는 것: 평문 HTTP 허용, 차량 신호 시험 수신기(debug/)
+app/src/test/        JVM 단위 테스트(디버그 전용 코드는 app/src/testDebug/)
 tools/mock_djtrot.py 개발용 목 서버
+tools/trigger.py     차량 신호 시험 도구
 docs/                구조 설명, 공모전·Pleos 요건 정리, README 이미지
 .github/             CI(수동 실행), Dependabot, 이슈·PR 템플릿
 ```

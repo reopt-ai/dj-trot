@@ -41,12 +41,16 @@ import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
 import android.util.Log
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
-import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 
 /**
@@ -60,8 +64,14 @@ import kotlinx.coroutines.flow.update
 class CarSignals(context: Context) {
     private val app = context.applicationContext
     private val main = Handler(Looper.getMainLooper())
+    /** SDK가 알려 준 실제 값. */
     private val _state = MutableStateFlow(DriveContext())
-    val state: StateFlow<DriveContext> = _state.asStateFlow()
+    /** 시험 도구가 덧씌운 값([stage]). 평소에는 아무것도 바꾸지 않는다. */
+    private val staged = MutableStateFlow<(DriveContext) -> DriveContext> { it }
+
+    /** 🔑 실제 값 위에 시험 값을 덧씌워 내보낸다 — SDK가 값을 다시 보내도 시험 값이 남는다. */
+    val state: StateFlow<DriveContext> = combine(_state, staged) { real, stage -> stage(real) }
+        .stateIn(CoroutineScope(Dispatchers.Unconfined), SharingStarted.Eagerly, DriveContext())
     private val _arrivals = MutableSharedFlow<Arrival>(extraBufferCapacity = 1)
 
     /** 목적지에 닿은 순간. DJ가 이번 길을 마무리하는 말을 한다. */
@@ -228,6 +238,24 @@ class CarSignals(context: Context) {
         startVehicle()
         startNavi()
         main.postDelayed(refresher, FIRST_REFRESH_MS)
+    }
+
+    /**
+     * 시험 도구(디버그 빌드의 `TriggerReceiver`, `tools/trigger.py`)가 차량 신호를 흉내 낸다. null이면 실제 값으로 돌아간다.
+     * 🔑 릴리스 빌드에는 부르는 곳이 없다.
+     */
+    internal fun stage(change: ((DriveContext) -> DriveContext)?) {
+        staged.value = change ?: { it }
+    }
+
+    /** 길 안내 시작을 흉내 낸다. 같은 곳으로 다시 떠나도 막지 않는다. */
+    internal fun stage(departure: Departure) {
+        _departures.tryEmit(departure)
+    }
+
+    /** 도착([waypoint]가 참이면 경유지 도착)을 흉내 낸다. */
+    internal fun stage(arrival: Arrival, waypoint: Boolean = false) {
+        if (waypoint) _waypoints.tryEmit(arrival) else _arrivals.tryEmit(arrival)
     }
 
     /** 내비 정보는 요청하면 리스너로 돌아온다. 경로가 바뀌면 다시 묻고, 그 밖에는 주기적으로 갱신한다. */

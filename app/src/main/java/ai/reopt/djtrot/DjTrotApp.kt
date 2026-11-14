@@ -90,9 +90,9 @@ class DjTrotApp : Application() {
 
     /**
      * 말로 넣은 사연을 받았다 — 화면은 바로 기기에서 쓴 사연([StoryBuilder])을 보이고,
-     * 서버 DJ 브리프가 답하면 그 말을 담은 제안으로 바꾼다.
+     * 서버 DJ 브리프가 답하면 그 말을 담은 제안으로 바꾼다. 디버그 빌드의 시험 도구도 마이크 대신 이 길로 넣는다.
      */
-    private fun wish(spoken: String) {
+    internal fun wish(spoken: String) {
         dj.update { it.hear(spoken) }
         scope.launch {
             runCatching { api.brief(car.state.value.toInput(LocalTime.now(), spoken), voice = false) }

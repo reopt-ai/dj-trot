@@ -1,5 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <!-- 디버그 빌드만: 로컬 서버와 목 서버(10.0.2.2, localhost, 127.0.0.1)로 평문 HTTP를 허용한다 -->
-    <application android:networkSecurityConfig="@xml/network_security_config" />
+    <application android:networkSecurityConfig="@xml/network_security_config">
+        <!-- 디버그 빌드만: 차량 신호 시험 도구(tools/trigger.py). 🔴 DUMP는 셸과 시스템만 가진 권한이라 다른 앱은 부르지 못한다. -->
+        <receiver
+            android:name=".debug.TriggerReceiver"
+            android:exported="true"
+            android:permission="android.permission.DUMP">
+            <intent-filter>
+                <action android:name="ai.reopt.djtrot.debug.TRIGGER" />
+            </intent-filter>
+        </receiver>
+    </application>
 </manifest>
