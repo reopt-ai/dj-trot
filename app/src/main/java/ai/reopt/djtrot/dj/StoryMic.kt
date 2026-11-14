@@ -91,7 +91,8 @@ class StoryMic(context: Context, private val onHeard: (String) -> Unit) {
                     main.post {
                         // 🔴 리스너·로케일은 초기화가 끝난 뒤에 건다(Pleos TTS와 같은 순서).
                         runCatching { engine.addListener(listener) }
-                        runCatching { engine.setLocale(Locale.KOREAN) }
+                        // 🔴 나라까지 붙은 ko_KR이어야 한다 — 언어만(ko) 주면 온디바이스 엔진이 "unsupported locale: ko-"로 거절한다.
+                        runCatching { engine.setLocale(Locale.KOREA) }
                         if (!server) return@post begin(engine)
                         // 🔑 서버 모드는 앱 등록 뒤에 듣는다. 등록이 실패하거나 답이 없어도 온디바이스로 듣는다.
                         val once = AtomicBoolean(false)
