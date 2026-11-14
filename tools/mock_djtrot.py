@@ -200,8 +200,18 @@ def make_handler(upstream, files, catalog, fake_seconds, real_audio=None):
             waited = time.monotonic() - started
             state = "queued" if waited < 3 else "running" if waited < fake_seconds else "ready"
             value = {"id": song_id, "state": state, "brief": brief}
+            if state == "running":
+                # 제작 중계 — 앞 1/4은 작사, 그 뒤는 작곡(제목·가사 몇 줄이 붙는다), 끝 5초는 마무리.
+                preview = {"title": "이 길의 노래", "lines": ["먼 길 돌아 달려온 이 저녁에", "창밖으로 번지는 그리운 얼굴", "가자 가자 그대 곁으로", "이 길 끝에 내가 있잖아"]}
+                if waited < max(6, fake_seconds / 4):
+                    value["progress"] = {"phase": "lyrics", "title": None, "lines": []}
+                elif waited < fake_seconds - 5:
+                    value["progress"] = {"phase": "compose", **preview}
+                else:
+                    value["progress"] = {"phase": "finish", **preview}
             if state == "ready":
-                made = self.made_song()
+                # 시연 손님(로그인 없음)은 서버에 만든 곡이 없다 — 제공 목록의 첫 곡으로 완성한다.
+                made = self.made_song() if self.headers.get("Authorization") else next(iter(self.songs()), None)
                 if made is None:
                     return {**value, "state": "failed", "errorCode": "MOCK_NO_SONG"}
                 value["song"] = made
@@ -226,7 +236,7 @@ def make_handler(upstream, files, catalog, fake_seconds, real_audio=None):
             length = int(self.headers.get("Content-Length") or 0)
             data = self.rfile.read(length) if length else None
             # Host까지 넘겨야 서버가 만드는 절대 주소가 에뮬레이터(10.0.2.2)에서 닿는다.
-            headers = {k: v for k, v in self.headers.items() if k.lower() in ("accept", "authorization", "content-type", "host", "range")}
+            headers = {k: v for k, v in self.headers.items() if k.lower() in ("accept", "authorization", "content-type", "host", "range", "x-djtrot-guest")}
             request = urllib.request.Request(upstream + self.path, data=data, headers=headers, method=method)
             try:
                 with urllib.request.urlopen(request, timeout=60) as response:
