@@ -1,5 +1,7 @@
 package ai.reopt.djtrot.ui
 
+import ai.reopt.djtrot.dj.StoryBuilder
+import androidx.compose.foundation.horizontalScroll
 import ai.reopt.djtrot.DjTrotApp
 import ai.reopt.djtrot.account.Connection
 import ai.reopt.djtrot.api.Choice
@@ -171,38 +173,51 @@ private fun RequestAct(app: DjTrotApp, suggestion: SongRequest, djName: String, 
         }
         Spacer(Modifier.height(18.dp))
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(18.dp)) {
-            // 사연 — DJ가 이 길을 보고 쓴 것. 말로 바꿀 수 있다.
+            // 사연 — 이 화면의 주인공이다. DJ가 이 길을 보고 먼저 써 두고, 말하거나 예시를 눌러 바꾼다.
+            val mine = dj.freshSpoken() != null
+            val listening = hearing.listening
             Column(
                 Modifier
                     .fillMaxWidth()
-                    .djCard(radius = 28.dp)
-                    .background(Brush.verticalGradient(listOf(DjColors.Cream.copy(alpha = 0.6f), Color.Transparent)))
-                    .padding(horizontal = 30.dp, vertical = 24.dp),
+                    .djCard(radius = 28.dp, background = DjColors.CardRaised, line = if (listening) DjColors.Gold else DjColors.GoldRing)
+                    .background(Brush.verticalGradient(listOf(DjColors.Cream.copy(alpha = 0.85f), Color.Transparent)))
+                    .padding(horizontal = 30.dp, vertical = 20.dp),
             ) {
-                Text("$djName 추천 · 이 길의 사연", style = body(DjType.LabelM, DjColors.Gold, FontWeight.Bold))
-                Spacer(Modifier.height(12.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("이 길의 사연", style = headline(DjType.TitleS, DjColors.Gold2, FontWeight.ExtraBold), modifier = Modifier.weight(1f), maxLines = 1)
+                    Pill(if (mine) DjIcons.Mic else DjIcons.Sparkle, if (mine) "내가 넣은 사연" else "$djName 추천", active = mine)
+                }
+                Spacer(Modifier.height(14.dp))
                 when {
-                    hearing.listening && (driving || hearing.heard.isBlank()) -> Text("듣고 있어요. 사연을 말씀해 주세요", style = body(DjType.BodyM, DjColors.Gold2))
-                    hearing.listening -> Text("“${hearing.heard}”", style = headline(DjType.TitleS, DjColors.Gold2, FontWeight.Bold), maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    listening && (driving || hearing.heard.isBlank()) -> Text("듣고 있어요. 사연을 말씀해 주세요", style = headline(DjType.TitleS, DjColors.Gold2, FontWeight.Bold))
+                    listening -> Text("“${hearing.heard}”", style = headline(DjType.TitleS, DjColors.Gold2, FontWeight.Bold), maxLines = 3, overflow = TextOverflow.Ellipsis)
                     driving -> Text("정차하면 사연을 보여 드릴게요", style = body(DjType.BodyM, DjColors.Muted))
-                    else -> Text("“${request.story}”", style = headline(DjType.TitleS, DjColors.Ink, FontWeight.Bold), maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    else -> Text("“${request.story}”", style = headline(DjType.TitleS, DjColors.Ink, FontWeight.Bold), maxLines = 3, overflow = TextOverflow.Ellipsis)
                 }
                 Spacer(Modifier.height(16.dp))
-                // 🔑 말로 넣는 사연(Pleos SpeechToText) — 주행 중에도 손 대신 말로 넣을 수 있다.
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Pill(
-                        icon = DjIcons.Mic,
-                        text = when {
-                            hearing.listening -> "다 말했어요"
-                            dj.freshSpoken() != null -> "사연 다시 말하기"
-                            else -> "말로 사연 넣기"
-                        },
-                        active = hearing.listening,
-                        onClick = { if (hearing.listening) app.mic.stop() else app.mic.listen() },
-                    )
-                    hearing.problem?.let { problem ->
-                        Spacer(Modifier.width(16.dp))
-                        Text(problem, style = body(DjType.LabelS, DjColors.Muted), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                // 🔑 말로 넣는 사연(Pleos SpeechToText) — 주행 중에도 손 대신 말로 넣을 수 있다. 이 카드에서 가장 큰 버튼이다.
+                MicButton(
+                    listening = listening,
+                    text = when {
+                        listening -> "다 말했어요"
+                        else -> "사연 음성 입력"
+                    },
+                    hint = when {
+                        listening -> "말을 마치면 눌러 주세요"
+                        mine -> hearing.problem ?: "다시 말하면 사연이 바뀌어요"
+                        else -> hearing.problem ?: "눌러서 말해 주세요 · “어머니 뵈러 가는 길이에요”"
+                    },
+                    onClick = { if (listening) app.mic.stop() else app.mic.listen() },
+                )
+                // 🔑 예시 사연 — 말하기 어려울 때 한 번 눌러 넣는다(키보드 대신 프리셋). 고르기와 같이 정차 중에만 보인다.
+                //    제작실 전체가 한 화면에 들어오게 이름표 없이 버튼만 둔다.
+                if (parked && !listening) {
+                    Spacer(Modifier.height(14.dp))
+                    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        StoryBuilder.IDEAS.forEach { (label, story) ->
+                            Pill(null, label, active = dj.freshSpoken() == story, onClick = { app.wish(story) })
+                        }
+                        if (mine) Pill(DjIcons.Refresh, "DJ 추천으로", onClick = { app.dj.update { it.forget().copy(suggestion = null, suggestedAt = null) } })
                     }
                 }
             }
@@ -248,6 +263,44 @@ private fun RequestAct(app: DjTrotApp, suggestion: SongRequest, djName: String, 
                 app.orders.create(request, drive.toInput(LocalTime.now(), app.spoken))
                 app.dj.update { it.forget() }
             }
+        }
+    }
+}
+
+/**
+ * 사연 카드의 마이크 버튼 — 무대의 "DJ 트롯 시작"과 같은 금빛 새틴 버튼. 듣는 동안은 어두운 바탕에 금빛 테와 움직이는 막대로 "듣는 중"을 보인다.
+ */
+@Composable
+private fun MicButton(listening: Boolean, text: String, hint: String, onClick: () -> Unit) {
+    val source = remember { MutableInteractionSource() }
+    val shape = RoundedCornerShape(26.dp)
+    val ink = if (listening) DjColors.Gold2 else DjColors.OnGold
+    Box(
+        Modifier
+            .pressScale(source, depth = 0.97f)
+            .fillMaxWidth()
+            .height(96.dp)
+            .then(if (listening) Modifier else Modifier.shadow(16.dp, shape, ambientColor = DjColors.Gold, spotColor = DjColors.GoldDeep))
+            .clip(shape)
+            .background(DjColors.Selected)
+            .border(if (listening) 2.dp else 1.5.dp, if (listening) DjColors.Gold else DjColors.SatinEdge, shape)
+            .tap(source, label = text, onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        if (!listening) {
+            Image(painterResource(R.drawable.art_gold_satin), contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.matchParentSize())
+            // 위쪽 가장자리의 빛 — 금속판이 도톰해 보이게.
+            Box(Modifier.matchParentSize().background(Brush.verticalGradient(0f to Color.White.copy(alpha = 0.22f), 0.35f to Color.Transparent, 1f to DjColors.OnGold.copy(alpha = 0.12f))))
+        }
+        Row(Modifier.fillMaxWidth().padding(horizontal = 30.dp), verticalAlignment = Alignment.CenterVertically) {
+            if (listening) Equalizer(playing = !LocalCalm.current, height = 34.dp, modifier = Modifier.width(44.dp))
+            else Icon(DjIcons.Mic, contentDescription = null, tint = ink, modifier = Modifier.size(44.dp))
+            Spacer(Modifier.width(18.dp))
+            Column(Modifier.weight(1f)) {
+                Text(text, style = headline(DjType.TitleS, ink, FontWeight.ExtraBold), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(hint, style = body(DjType.LabelM, ink.copy(alpha = 0.8f), FontWeight.Bold), maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+            if (!listening) Icon(DjIcons.ChevronRight, contentDescription = null, tint = ink, modifier = Modifier.size(40.dp))
         }
     }
 }

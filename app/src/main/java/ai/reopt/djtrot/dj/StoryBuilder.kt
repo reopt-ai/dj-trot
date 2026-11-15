@@ -30,6 +30,19 @@ data class SongRequest(
 object StoryBuilder {
     const val MAX_STORY = 200
 
+    /**
+     * 예시 사연 — 트롯 제작실에서 한 번 눌러 넣는다(버튼 이름 to 사연). 말로 넣은 사연과 같은 길로 간다.
+     * 🔑 운전석에서 글자를 치지 않게 하려는 것이다. 사연의 낱말이 주제 고르기에 걸리도록 쓴다(어머니·여보·친구…).
+     */
+    val IDEAS: List<Pair<String, String>> = listOf(
+        "어머니 뵈러" to "어머니 뵈러 고향 가는 길이에요",
+        "고생한 퇴근길" to "오늘 하루 고생한 나를 위한 퇴근길 노래",
+        "여보 고마워" to "여보에게 고맙다고 전하고 싶어요",
+        "친구 만나러" to "오랜 친구들 만나러 가는 길이에요",
+        "설레는 여행" to "오랜만에 떠나는 여행길이 설레요",
+        "힘내자 응원" to "오늘도 힘내자고 응원하고 싶어요",
+    )
+
     fun build(drive: DriveContext, now: LocalTime, spoken: String? = null): SongRequest {
         val place = when (drive.destination?.kind) {
             PlaceKind.HOME -> "집"
