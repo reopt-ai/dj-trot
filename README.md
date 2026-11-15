@@ -416,7 +416,7 @@ docs/                구조 설명, 공모전·Pleos 요건 정리, README 이�
 - 제출용 APK: `apk/reopt_DJTrot_release.apk`(`apk/팀명_앱이름_release.apk` 형식). 운영 서버(`https://miniapp.reopt.ai/api/v1/dj-trot`)에 붙는 서명된 릴리즈입니다.
 - 만드는 법: `tools/release.sh` — 단위 테스트·릴리즈 lint를 돌리고 서명한 APK를 `apk/`에 둡니다. 서명 키(`djtrot.releaseStoreFile`·`releaseStorePassword`·`releaseKeyAlias`·`releaseKeyPassword`)와 Pleos Client ID/Secret(`djtrot.pleosClientId`·`pleosClientSecret`)은 저장소 밖 `~/.gradle/gradle.properties`에 둡니다. 서명 값이 없으면 `assembleRelease`는 서명하지 않은 APK를 내고, 그 APK는 설치되지 않습니다.
 - 설치: `adb install apk/reopt_DJTrot_release.apk`(디버그 빌드가 깔려 있으면 서명이 달라 먼저 지웁니다).
-- ⚠️ 릴리즈 APK에는 Pleos Client ID/Secret이 들어 있습니다(TTS·STT 서버 모드가 앱에서 `registerApp`으로 쓰는 값이라 빼낼 수 있습니다). APK를 공개된 곳에 올리기 전에 이 값을 공개해도 되는지 확인하고, 안 되면 값을 빼고 빌드합니다(온디바이스 모드로 동작).
+- ⚠️ 릴리즈 APK에는 Pleos Client ID/Secret이 들어 있습니다(TTS·STT 서버 모드가 앱에서 `registerApp`으로 쓰는 값이라 빼낼 수 있습니다). 공모전 시연을 위해 이 APK는 값을 담은 채 공개하며, 새면 다시 발급하는 값으로 다룹니다([SECURITY.md](SECURITY.md)). 값을 빼고 빌드하면 온디바이스 모드로만 동작합니다.
 - 공모전 일정과 요건: [docs/contest.md](docs/contest.md)
 
 ## 기여
@@ -431,4 +431,4 @@ git config core.hooksPath .githooks
 
 ## 라이선스
 
-비공개 저장소입니다. 코드와 이미지의 권리는 reopt Inc.에 있으며, 허락 없이 복제하거나 배포할 수 없습니다. Pleos SDK와 Pleos Connect Emulator 이미지는 42dot의 라이선스를 따릅니다. 화면 아이콘 일부는 Google [Material Symbols](https://github.com/google/material-design-icons)(Apache License 2.0)의 도형을 옮겨 썼습니다.
+공모전 심사와 열람을 위해 소스를 공개한 저장소이며, 오픈소스 라이선스를 부여하지 않습니다. 코드와 이미지의 권리는 reopt Inc.에 있으며, 허락 없이 복제하거나 배포할 수 없습니다. Pleos SDK와 Pleos Connect Emulator 이미지는 42dot의 라이선스를 따릅니다. 화면 아이콘 일부는 Google [Material Symbols](https://github.com/google/material-design-icons)(Apache License 2.0)의 도형을 옮겨 썼습니다.
