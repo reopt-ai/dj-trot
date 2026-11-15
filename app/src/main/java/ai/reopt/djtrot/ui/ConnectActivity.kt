@@ -8,6 +8,8 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.Image
+import androidx.compose.ui.draw.rotate
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -145,9 +147,9 @@ private fun ConnectScreen(app: DjTrotApp, onDone: () -> Unit) {
                     Spacer(Modifier.height(28.dp))
                     Status(step, left)
                     Spacer(Modifier.height(28.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                        BackButton(onDone)
                         if (step == Step.EXPIRED || step == Step.FAILED) Pill(DjIcons.Refresh, "새 번호 받기", active = true, onClick = { attempt++ })
-                        Pill(null, "닫기", onClick = onDone)
                     }
                 }
                 Box(Modifier.width(560.dp).fillMaxHeight(), contentAlignment = Alignment.Center) {
@@ -227,3 +229,28 @@ private fun qr(text: String, size: Int): Bitmap {
 private fun deviceName(): String = "DJ 트롯 · ${Build.MANUFACTURER} ${Build.MODEL}".take(60)
 
 private const val POLL_SECONDS = 3L
+
+/**
+ * 뒤로가기 — 이 화면을 닫고 DJ 트롯으로 돌아간다.
+ * 🔑 차 안에서 한 번에 누를 수 있게 크게 둔다(높이 88dp). 금빛 테와 왼쪽 화살표로 "돌아가는 버튼"임을 알린다.
+ */
+@Composable
+private fun BackButton(onClick: () -> Unit) {
+    val source = remember { MutableInteractionSource() }
+    val shape = RoundedCornerShape(24.dp)
+    Row(
+        Modifier
+            .pressScale(source, depth = 0.96f)
+            .height(88.dp)
+            .clip(shape)
+            .background(DjColors.CardRaised)
+            .border(2.dp, DjColors.GoldRing, shape)
+            .tap(source, label = "뒤로가기", onClick = onClick)
+            .padding(start = 22.dp, end = 34.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(DjIcons.ChevronRight, contentDescription = null, tint = DjColors.Gold2, modifier = Modifier.size(44.dp).rotate(180f))
+        Spacer(Modifier.width(8.dp))
+        Text("뒤로가기", style = body(DjType.BodyM, DjColors.Gold2, FontWeight.Bold), maxLines = 1)
+    }
+}
