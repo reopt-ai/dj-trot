@@ -31,5 +31,6 @@ fun DriveContext.toInput(now: LocalTime, spoken: String = "", seed: Long = 0, al
     },
     gear = gear.name,
     weather = VoiceLines.weather(this),
-    scene = VoiceLines.scene(this, seed, local = false, always = always)?.id,
+    // 🔴 서버가 받는다고 알린 장면만 보낸다 — 옛 서버는 뒤에 더한 장면을 400으로 거절한다.
+    scene = VoiceLines.scene(this, seed, local = false, always = always)?.id?.takeIf { it in VoiceLines.serverScenes },
 )

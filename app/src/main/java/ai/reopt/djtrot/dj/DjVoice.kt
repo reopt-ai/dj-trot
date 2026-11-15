@@ -20,7 +20,11 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import ai.pleos.playground.tts.TextToSpeech as PleosTextToSpeech
 
-/** DJ 목소리. 말할 수 없는 환경이면 조용히 넘어가고 화면에 멘트만 보인다. */
+/**
+ * DJ 목소리(기기 TTS). 말할 수 없는 환경이면 조용히 넘어가고 화면에 멘트만 보인다.
+ * 🔑 마지막 수단이다 — DJ의 말은 서버가 만든 음성(브리프의 조각·받아 둔 음성 팩)으로 먼저 내고,
+ *    그 음성이 하나도 없을 때만 이 목소리로 읽는다(재생 서비스의 `talk()`).
+ */
 interface DjVoice {
     val engine: String
 
@@ -166,7 +170,9 @@ private class PleosVoice(
                                 }
                             })
                         }
-                        runCatching { tts.setLocale(Locale.KOREAN) }
+                        // 🔴 나라까지 붙은 ko_KR이어야 한다 — SDK가 `toLanguageTag()`로 보내는데 지원 로케일은 `ko-KR`이다(Pleos TTS Set locale).
+                        //    언어만(ko) 주면 온디바이스 엔진이 거절한다. 말로 넣는 사연([StoryMic])과 같은 값이다.
+                        runCatching { tts.setLocale(Locale.KOREA) }
                         val voice = PleosVoice(tts, talking, cutOff)
                         if (!server) return onReady(voice)
                         // 🔑 서버 모드는 앱 등록이 끝난 뒤에 말해야 한다(Pleos TTS 문서). 등록이 실패해도 온디바이스로 말한다.

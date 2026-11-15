@@ -1,6 +1,7 @@
 package ai.reopt.djtrot.dj
 
 import ai.reopt.djtrot.car.Arrival
+import ai.reopt.djtrot.car.Caution
 import ai.reopt.djtrot.car.Departure
 import ai.reopt.djtrot.car.DriveContext
 import ai.reopt.djtrot.car.PlaceKind
@@ -75,8 +76,16 @@ object DjScript {
                 RoadAhead.TOLL -> "곧 톨게이트를 지납니다."
                 null -> null
             },
+            when (drive.caution) {
+                Caution.FOG -> "안개가 잦은 구간입니다. 속도를 조금 줄여 가시죠."
+                Caution.SLIPPERY -> "길이 미끄러운 구간입니다. 천천히 가시죠."
+                Caution.WILDLIFE -> "야생동물이 나오는 길입니다. 앞을 잘 살펴 가시죠."
+                Caution.ACCIDENT -> "사고가 잦은 곳입니다. 조심히 가시죠."
+                null -> null
+            },
             drive.traffic?.let(::jam),
             drive.tripMinutes?.takeIf { drive.longDrive }?.let { "벌써 ${duration(it)}째 달리고 계시네요. 잠깐 쉬어 가셔도 좋겠어요." },
+            if (drive.lowBattery) "배터리가 얼마 남지 않았네요. 가까운 충전소에 들렀다 가시죠." else null,
             when {
                 drive.fog -> "안개 낀 ${time.road}이네요. 천천히 가시죠."
                 drive.raining -> "비 오는 ${time.road}이네요."
@@ -85,6 +94,12 @@ object DjScript {
             if (destination != null && minutes != null) toward(destination.name, destination.kind, "${minutes}분 남았네요.") else null,
             if (drive.charging) "충전하는 동안 한 곡 들으시죠." else null,
             if (drive.company) "함께 타신 분과 같이 들으시죠." else null,
+            when {
+                drive.cold -> "바깥이 많이 춥네요. 따뜻한 노래 한 곡 들으시죠."
+                drive.hot -> "바깥이 참 덥네요. 시원한 노래 한 곡 들으시죠."
+                else -> null
+            },
+            if (drive.sport && !drive.stopped) "스포츠 모드로 신나게 가는 길이네요. 안전하게 가시죠." else null,
             if (drive.cruising) "크루즈 켜고 편안히 가는 길이네요." else null,
             drive.region?.let { "$it 지나시는 ${time.road}에" },
             if (drive.freeDrive && destination == null && !drive.stopped) "발길 닿는 대로 달리는 ${time.road}이네요." else null,
@@ -102,6 +117,7 @@ object DjScript {
         val where = traffic.road?.let { "$it 쪽이" } ?: "가는 길이"
         return when {
             traffic.accident -> "가는 길에 사고 소식이 있네요. 천천히 가시죠."
+            traffic.roadwork && traffic.jamMinutes < Traffic.JAM_MINUTES -> "가는 길에 공사 구간이 있네요. 천천히 가시죠."
             traffic.roadwork -> "$where 공사로 ${traffic.jamMinutes}분쯤 막히네요. 느긋하게 가시죠."
             else -> "$where ${traffic.jamMinutes}분쯤 막히네요. 느긋하게 가시죠."
         }

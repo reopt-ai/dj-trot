@@ -1,11 +1,13 @@
 package ai.reopt.djtrot.dj
 
 import ai.reopt.djtrot.car.Arrival
+import ai.reopt.djtrot.car.Caution
 import ai.reopt.djtrot.car.Departure
 import ai.reopt.djtrot.car.DriveContext
 import ai.reopt.djtrot.car.GearState
 import ai.reopt.djtrot.car.PlaceKind
 import ai.reopt.djtrot.car.RoadAhead
+import ai.reopt.djtrot.car.Traffic
 
 /**
  * DJ 음성 팩의 조각 고르기 — 멘트를 조각(여는 말 → 남은 시간 → 곡 소개)으로 이어 틀 때 어떤 조각을 쓸지 정한다.
@@ -25,6 +27,30 @@ object VoiceLines {
         COMPANY("company"),
         CRUISING("cruising"),
         FREE_DRIVE("free_drive"),
+        // 🔑 아래는 뒤에 더한 장면이다 — 서버가 받는다고 알린 값만 보낸다([serverScenes]).
+        ROADWORK("roadwork"),
+        CAUTION_FOG("caution_fog"),
+        CAUTION_SLIPPERY("caution_slippery"),
+        CAUTION_WILDLIFE("caution_wildlife"),
+        CAUTION_ACCIDENT("caution_accident"),
+        LOW_BATTERY("low_battery"),
+        COLD("cold"),
+        HOT("hot"),
+        SPORT("sport"),
+    }
+
+    /** 처음부터 있던 장면 — 어느 서버나 받는다. */
+    val LEGACY_SCENES: Set<String> = setOf("rest_area", "tunnel", "toll", "jam", "accident", "long_drive", "charging", "company", "cruising", "free_drive")
+
+    /**
+     * 서버가 받는 장면 — 서버 설정(`/config`의 `scenes`)이 알려 준다. 받기 전이나 옛 서버면 [LEGACY_SCENES]다.
+     * 🔴 서버 스키마가 strict라 모르는 장면을 보내면 브리프와 노래 만들기가 400이다. 서버로 가는 값은 이 목록으로 거른다.
+     */
+    @Volatile var serverScenes: Set<String> = LEGACY_SCENES
+        private set
+
+    fun serverScenes(known: List<String>) {
+        serverScenes = if (known.isEmpty()) LEGACY_SCENES else known.toSet()
     }
 
     /** 곡마다 변주를 고르는 씨앗(FNV-1a, 0..2^32-1). 같은 곡은 같은 멘트가 나온다. */
@@ -56,7 +82,8 @@ object VoiceLines {
     }
 
     /**
-     * 지금 길의 장면. 급한 것부터 — 곧 지나는 곳, 정체·사고, 오래 달림. 그다음은 분위기(충전, 동승, 크루즈, 발길 닿는 대로).
+     * 지금 길의 장면. 급한 것부터 — 곧 지나는 곳, 주의 구간, 사고·공사·정체, 오래 달림, 배터리 부족.
+     * 그다음은 분위기(충전, 동승, 바깥 기온, 스포츠 모드, 크루즈, 발길 닿는 대로).
      * 🔑 분위기 장면은 곡의 절반([seed] 짝수)에만 쓴다 — 크루즈를 켜 둔 내내 같은 말만 하지 않게.
      *    [always]가 참이면(시연) 곡을 가리지 않고 쓴다.
      * 🔴 [local]이 거짓이면 서버로 보낼 값이다 — 동승자 유무는 기기 밖으로 내보내지 않는다.
@@ -68,12 +95,30 @@ object VoiceLines {
             RoadAhead.TOLL -> return Scene.TOLL
             null -> Unit
         }
-        drive.traffic?.let { return if (it.accident) Scene.ACCIDENT else Scene.JAM }
+        when (drive.caution) {
+            Caution.FOG -> return Scene.CAUTION_FOG
+            Caution.SLIPPERY -> return Scene.CAUTION_SLIPPERY
+            Caution.WILDLIFE -> return Scene.CAUTION_WILDLIFE
+            Caution.ACCIDENT -> return Scene.CAUTION_ACCIDENT
+            null -> Unit
+        }
+        drive.traffic?.let {
+            return when {
+                it.accident -> Scene.ACCIDENT
+                // 공사는 막히는 시간이 짧을 때만 따로 말한다 — 길게 막히면 정체가 더 급한 말이다.
+                it.roadwork && it.jamMinutes < Traffic.JAM_MINUTES -> Scene.ROADWORK
+                else -> Scene.JAM
+            }
+        }
         if (drive.longDrive) return Scene.LONG_DRIVE
+        if (drive.lowBattery) return Scene.LOW_BATTERY
         if (!always && seed % 2 != 0L) return null
         return when {
             drive.charging -> Scene.CHARGING
             drive.company && local -> Scene.COMPANY
+            drive.cold -> Scene.COLD
+            drive.hot -> Scene.HOT
+            drive.sport && !drive.stopped -> Scene.SPORT
             drive.cruising -> Scene.CRUISING
             drive.freeDrive && drive.destination == null && !drive.stopped -> Scene.FREE_DRIVE
             else -> null
@@ -105,9 +150,10 @@ object VoiceLines {
 
     /**
      * 기기가 고르는 조각 — 차만 아는 것(즐겨찾기의 집·회사, 동승자)까지 쓴다. 기기 밖으로 나가는 값이 없다.
+     * [plain]이 참이면 장면 없이 고른다 — 장면 조각을 아직 받아 두지 못했을 때 시간대·날씨 인사로 대신한다(서버도 같은 식으로 고른다).
      */
-    fun leadIds(drive: DriveContext, hour: Int, seed: Long, always: Boolean = false): List<String> = leadIds(
-        scene = scene(drive, seed, local = true, always = always),
+    fun leadIds(drive: DriveContext, hour: Int, seed: Long, always: Boolean = false, plain: Boolean = false): List<String> = leadIds(
+        scene = if (plain) null else scene(drive, seed, local = true, always = always),
         weather = weather(drive),
         parked = drive.gear == GearState.PARK,
         hasDestination = drive.destination != null,
@@ -142,6 +188,12 @@ object VoiceLines {
     }
 
     const val WAYPOINT_ID = "waypoint"
+
+    /** 맡긴 노래가 완성됐을 때의 조각. */
+    const val SONG_READY_ID = "song.ready"
+
+    /** 광고로 받을 생성권을 오늘 다 받았을 때의 조각. */
+    const val AD_LIMITED_ID = "ad.outro.limited"
 
     /** 제목 없는 곡 소개의 변주 수. 🔴 서버의 조각 수와 같아야 한다. */
     private const val PLAY_VARIANTS = 6

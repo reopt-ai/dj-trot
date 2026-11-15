@@ -469,7 +469,7 @@ private fun StagePanel(view: Section, m: StageModel, player: Player?, modifier: 
                     shown == Section.CREATE -> CreateView(m, player, Modifier.fillMaxSize())
                     shown == Section.DEMO -> DemoView(
                         m.app, m.drive, m.driving, m.talks, m.onToggleTalks,
-                        onStartMusic = { player?.let { if (m.ui.hasItems) it.play() else playList(it, Shelf.PICKS.id) } },
+                        onStartMusic = { player?.let { if (m.ui.hasItems) { if (it.playbackState == Player.STATE_IDLE) it.prepare(); it.play() } else playList(it, Shelf.PICKS.id) } },
                         settingsPage, { settingsPage = it }, m.demo, m.ui.playing, m.dj.line, columns = if (m.roomy) 4 else 3, onStep = m.onDemo, onEnd = m.onEndDemo, lines = m.demoLines, onLine = m.onDemoLine, modifier = Modifier.fillMaxSize())
                     live -> PlayView(m, Modifier.fillMaxSize())
                     else -> StageIdle(player, Modifier.fillMaxSize())

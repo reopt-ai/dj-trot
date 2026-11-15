@@ -64,7 +64,7 @@ data class Traffic(
         /** 🔑 내비의 정체 시간은 초다(Pleos NaviHelper `TrafficCongestionSummary`). 짧은 정체는 말할 거리가 아니다. */
         fun of(jamSeconds: Long, road: String?, accident: Boolean, roadwork: Boolean): Traffic? {
             val minutes = ((jamSeconds + 30) / 60).toInt()
-            if (minutes < JAM_MINUTES && !accident) return null
+            if (minutes < JAM_MINUTES && !accident && !roadwork) return null
             return Traffic(minutes, road?.trim()?.takeIf { it.isNotEmpty() }, accident, roadwork)
         }
     }
@@ -72,6 +72,14 @@ data class Traffic(
 
 /** 곧 지나는 곳 — 내비 TBT가 알려 준다. */
 enum class RoadAhead { TUNNEL, TOLL, REST_AREA }
+
+/** 곧 지나는 주의 구간 — 내비가 알려 주는 것 가운데 DJ가 한마디 할 만한 것만(Pleos NaviHelper `CautionPointType`). */
+enum class Caution(val label: String) {
+    FOG("안개 잦은 곳"),
+    SLIPPERY("미끄러운 길"),
+    WILDLIFE("야생동물 주의"),
+    ACCIDENT("사고 잦은 곳"),
+}
 
 /** 목적지에 닿았을 때 내비가 알려 주는 이번 길. 값이 없으면 null. */
 data class Arrival(
@@ -116,12 +124,20 @@ data class DriveContext(
     val cruising: Boolean = false,
     /** 충전구가 열려 있다 — 서 있을 때는 충전 중으로 본다. */
     val chargePortOpen: Boolean = false,
+    /** 충전기가 꽂혀 있다(AAOS `EV_CHARGE_PORT_CONNECTED`). 충전구가 열린 것보다 확실한 신호다. */
+    val chargerConnected: Boolean = false,
+    /** 곧 지나는 주의 구간(내비). 지나고 나면 비운다. */
+    val caution: Caution? = null,
+    /** 바깥 기온(섭씨, AAOS `ENV_OUTSIDE_TEMPERATURE`). 차가 주지 않으면 null. */
+    val outsideCelsius: Int? = null,
     /** 앞 안개등이 켜져 있다. */
     val fog: Boolean = false,
     /** 앞 유리 와이퍼가 계속 움직인다 — 비나 눈이 온다. */
     val raining: Boolean = false,
     /** 운전석 말고도 누가 타고 있다. 🔴 기기 멘트에만 쓰고 서버로 보내지 않는다. */
     val company: Boolean = false,
+    /** 이 차가 주지 않는 Vehicle 값의 이름([SignalBoard]의 줄 이름) — `checkXXXCapabilities`가 읽을 수 없다고 답한 것. */
+    val unsupported: Set<String> = emptySet(),
 ) {
     val region: String? get() = Region.label(currentAddress ?: destination?.address)
 
@@ -150,11 +166,26 @@ data class DriveContext(
     /** 쉬어 가자고 권할 만큼 오래 달렸다. */
     val longDrive: Boolean get() = (tripMinutes ?: 0) >= LONG_DRIVE_MINUTES
 
-    /** 서서 충전하는 중으로 본다. */
-    val charging: Boolean get() = chargePortOpen && gear == GearState.PARK
+    /** 서서 충전하는 중으로 본다 — 충전기가 꽂혀 있거나 충전구가 열려 있다. */
+    val charging: Boolean get() = (chargerConnected || chargePortOpen) && gear == GearState.PARK
+
+    /** 배터리가 얼마 남지 않았다 — 충전하는 중에는 말하지 않는다. 0은 값이 없는 차(전기차가 아님)로 본다. */
+    val lowBattery: Boolean get() = !charging && (batteryPercent ?: 100) in 1..LOW_BATTERY_PERCENT
+
+    /** 바깥이 얼 만큼 춥다. */
+    val cold: Boolean get() = (outsideCelsius ?: 15) <= COLD_CELSIUS
+
+    /** 바깥이 한여름처럼 덥다. */
+    val hot: Boolean get() = (outsideCelsius ?: 15) >= HOT_CELSIUS
+
+    /** 스포츠 모드로 달린다. */
+    val sport: Boolean get() = drivingMode == "SPORT"
 
     companion object {
         const val LONG_DRIVE_MINUTES = 120
+        const val LOW_BATTERY_PERCENT = 15
+        const val COLD_CELSIUS = 0
+        const val HOT_CELSIUS = 30
 
         // android.car.drivingstate.CarUxRestrictions 값 — 순수 모델이라 상수만 옮겨 둔다.
         private const val UX_LIMIT_STRING_LENGTH = 4

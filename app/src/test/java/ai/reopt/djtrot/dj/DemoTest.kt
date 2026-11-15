@@ -45,6 +45,21 @@ class DemoTest {
         assertEquals(VoiceLines.Scene.LONG_DRIVE, VoiceLines.scene(press("long").apply(DriveContext()), seed = 1, local = true))
     }
 
+    @Test fun `뒤에 더한 버튼은 그 장면을 낸다`() {
+        fun scene(id: String) = VoiceLines.scene(press(id).apply(DriveContext()), seed = 1, local = true, always = true)
+        assertEquals(VoiceLines.Scene.ROADWORK, scene("roadwork"))
+        assertEquals(VoiceLines.Scene.CAUTION_WILDLIFE, scene("caution.wildlife"))
+        assertEquals(VoiceLines.Scene.LOW_BATTERY, scene("battery"))
+        assertEquals(VoiceLines.Scene.COLD, scene("cold"))
+        assertEquals(VoiceLines.Scene.HOT, scene("hot"))
+        assertEquals(VoiceLines.Scene.SPORT, scene("sport"))
+        // 다른 버튼을 누르면 앞 장면은 지워지고 실제 값으로 돌아간다.
+        val after = press("cold", "sport", "rain").apply(DriveContext(outsideCelsius = 12, drivingMode = "ECO", batteryPercent = 80))
+        assertEquals(12, after.outsideCelsius)
+        assertEquals("ECO", after.drivingMode)
+        assertEquals(80, after.batteryPercent)
+    }
+
     @Test fun `시간대 버튼은 인사에 쓰는 시각만 바꾼다`() {
         val night = press("depart.home", "hour.night")
         assertEquals(23, night.clock(LocalTime.of(14, 30)).hour)

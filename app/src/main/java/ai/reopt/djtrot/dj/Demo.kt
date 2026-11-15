@@ -1,6 +1,7 @@
 package ai.reopt.djtrot.dj
 
 import ai.reopt.djtrot.car.Arrival
+import ai.reopt.djtrot.car.Caution
 import ai.reopt.djtrot.car.Departure
 import ai.reopt.djtrot.car.Destination
 import ai.reopt.djtrot.car.DriveContext
@@ -31,6 +32,14 @@ data class DemoDrive(
     val charging: Boolean = false,
     val freeDrive: Boolean = false,
     val tripMinutes: Int? = null,
+    /** 곧 지나는 주의 구간(내비). */
+    val caution: Caution? = null,
+    /** 배터리 %. null이면 실제 값. */
+    val batteryPercent: Int? = null,
+    /** 바깥 기온(섭씨). null이면 실제 값. */
+    val outsideCelsius: Int? = null,
+    /** 스포츠 모드로 달린다. */
+    val sport: Boolean = false,
     /** 지금 좌표 — 광고의 좌표 조건을 흉내 낼 때만 쓴다. null이면 실제 값. */
     val location: GeoPoint? = null,
     /** 시간대 인사를 바꿔 보이는 시(0~23). null이면 지금 시각. */
@@ -52,8 +61,13 @@ data class DemoDrive(
         signaling = signaling,
         guidanceSoon = false,
         chargePortOpen = charging,
+        chargerConnected = charging,
         freeDrive = freeDrive,
         tripMinutes = tripMinutes,
+        caution = caution,
+        batteryPercent = batteryPercent ?: real.batteryPercent,
+        outsideCelsius = outsideCelsius ?: real.outsideCelsius,
+        drivingMode = if (sport) "SPORT" else real.drivingMode,
     )
 
     /** DJ가 인사에 쓰는 시각. */
@@ -63,6 +77,7 @@ data class DemoDrive(
     fun road(): DemoDrive = copy(
         gear = GearState.DRIVE, traffic = null, ahead = null, raining = false, fog = false, company = false, cruising = false,
         schoolZone = false, signaling = false, charging = false, freeDrive = false, tripMinutes = null, location = null,
+        caution = null, batteryPercent = null, outsideCelsius = null, sport = false,
     )
 
     /** 화면에 보이는 지금 상황 한 줄. */
@@ -75,7 +90,17 @@ data class DemoDrive(
         "목적지 없이 달림".takeIf { freeDrive },
         "비".takeIf { raining },
         "안개".takeIf { fog },
-        traffic?.let { if (it.accident) "사고 소식" else "정체 ${it.jamMinutes}분" },
+        traffic?.let {
+            when {
+                it.accident -> "사고 소식"
+                it.roadwork && it.jamMinutes < Traffic.JAM_MINUTES -> "공사 구간"
+                else -> "정체 ${it.jamMinutes}분"
+            }
+        },
+        caution?.label,
+        batteryPercent?.let { "배터리 $it%" },
+        outsideCelsius?.let { "바깥 ${it}℃" },
+        "스포츠 모드".takeIf { sport },
         when (ahead) {
             RoadAhead.TUNNEL -> "곧 터널"
             RoadAhead.TOLL -> "곧 톨게이트"
@@ -166,6 +191,18 @@ object Demo {
             road("cruise", "크루즈 주행", "크루즈 켬") { it.copy(cruising = true) },
             road("free", "발길 닿는 대로", "목적지 없이 달려요") { it.copy(destination = null, freeDrive = true) },
             road("school", "스쿨존", "어린이보호구역 · 곡 이름만 말해요") { it.copy(schoolZone = true) },
+        )),
+        // 🔑 뒤에 더한 장면 — 그 조각을 받아 둔 음성 팩에 있어야 그 말이 나온다. 없으면 시간대·날씨 인사로 대신한다.
+        DemoGroup("조심할 길 · 차의 상태", listOf(
+            road("roadwork", "공사 구간", "가는 길에 공사") { it.copy(traffic = Traffic(0, accident = false, roadwork = true)) },
+            road("caution.fog", "안개 잦은 곳", "내비 주의 구간") { it.copy(caution = Caution.FOG) },
+            road("caution.slippery", "미끄러운 길", "내비 주의 구간") { it.copy(caution = Caution.SLIPPERY) },
+            road("caution.wildlife", "야생동물 주의", "내비 주의 구간") { it.copy(caution = Caution.WILDLIFE) },
+            road("caution.accident", "사고 잦은 곳", "내비 주의 구간") { it.copy(caution = Caution.ACCIDENT) },
+            road("battery", "배터리 부족", "배터리 12%") { it.copy(batteryPercent = 12) },
+            road("cold", "추운 날", "바깥 영하 5도") { it.copy(outsideCelsius = -5) },
+            road("hot", "더운 날", "바깥 33도") { it.copy(outsideCelsius = 33) },
+            road("sport", "스포츠 모드", "주행 모드 SPORT") { it.copy(sport = true) },
         )),
         DemoGroup("시간대", listOf(
             hour("hour.dawn", "새벽", 4), hour("hour.morning", "아침", 8), hour("hour.afternoon", "오후", 14),

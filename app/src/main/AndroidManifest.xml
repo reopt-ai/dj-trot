@@ -12,8 +12,10 @@
 
     <!-- AAOS 표준: 기어(GEAR_SELECTION) -->
     <uses-permission android:name="android.car.permission.CAR_POWERTRAIN" />
-    <!-- AAOS 표준: 충전구(EV_CHARGE_PORT_OPEN) — 서서 충전하는 동안의 DJ 멘트 -->
+    <!-- AAOS 표준: 충전구(EV_CHARGE_PORT_OPEN)·충전기 연결(EV_CHARGE_PORT_CONNECTED) — 서서 충전하는 동안의 DJ 멘트 -->
     <uses-permission android:name="android.car.permission.CAR_ENERGY_PORTS" />
+    <!-- AAOS 표준: 바깥 기온(ENV_OUTSIDE_TEMPERATURE) — 춥거나 더운 날의 DJ 멘트 -->
+    <uses-permission android:name="android.car.permission.CAR_EXTERIOR_ENVIRONMENT" />
 
     <!-- Pleos SDK: 사용하는 도메인의 읽기 권한만 선언한다 -->
     <!-- DrivingMode·크루즈 컨트롤, Odometer(달린 시간) -->
@@ -49,6 +51,11 @@
         <meta-data
             android:name="com.android.automotive"
             android:resource="@xml/automotive_app_desc" />
+
+        <!-- 🔑 앱 런처 노출(Pleos Music/Audio 앱 개발 가이드 "런처 노출 메타데이터 설정"). -->
+        <meta-data
+            android:name="androidx.car.app.launchable"
+            android:value="true" />
 
         <!-- 🔑 CCP(회전 조작기)는 사용자 설치 앱에 선택이다. 지원하지 않는다고 밝히고, 모든 조작을 터치로 끝낼 수 있게 둔다
              (Pleos CCP Development Guide). 사전 탑재를 노리면 초점 이동을 붙이고 이 값을 지운다. -->

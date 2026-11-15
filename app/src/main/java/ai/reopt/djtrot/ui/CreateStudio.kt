@@ -117,7 +117,10 @@ fun CreateStudio(app: DjTrotApp, suggestion: SongRequest, djId: String, djName: 
 /** 완성곡을 지금 튼다 — 서비스가 다음 곡으로 넣어 뒀으면 그 곡으로 넘어가고, 아니면 그 곡만 새로 올린다. */
 private fun playMade(player: Player, songId: String) {
     // 무대에 이미 올라 있으면(빈 무대에 완성곡만 올린 때) 그대로 튼다.
-    if (player.currentMediaItem?.mediaMetadata?.extras?.getString(Catalog.EXTRA_SONG_ID) == songId) return player.play()
+    if (player.currentMediaItem?.mediaMetadata?.extras?.getString(Catalog.EXTRA_SONG_ID) == songId) {
+        if (player.playbackState == Player.STATE_IDLE) player.prepare()
+        return player.play()
+    }
     val next = player.currentMediaItemIndex + 1
     val queued = next < player.mediaItemCount && player.getMediaItemAt(next).mediaMetadata.extras?.getString(Catalog.EXTRA_SONG_ID) == songId
     if (queued) {

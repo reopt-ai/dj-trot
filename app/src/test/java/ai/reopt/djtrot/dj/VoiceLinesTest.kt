@@ -1,6 +1,7 @@
 package ai.reopt.djtrot.dj
 
 import ai.reopt.djtrot.car.Arrival
+import ai.reopt.djtrot.car.Caution
 import ai.reopt.djtrot.car.Departure
 import ai.reopt.djtrot.car.Destination
 import ai.reopt.djtrot.car.DriveContext
@@ -90,9 +91,53 @@ class VoiceLinesTest {
         assertNull(DriveContext(gear = GearState.DRIVE, cruising = true).toInput(LocalTime.NOON, seed = 1).scene)
         // 🔴 서버가 받는 값의 전부다 — 여기에 없는 값을 보내면 400이다.
         assertEquals(
-            listOf("rest_area", "tunnel", "toll", "jam", "accident", "long_drive", "charging", "company", "cruising", "free_drive"),
+            listOf(
+                "rest_area", "tunnel", "toll", "jam", "accident", "long_drive", "charging", "company", "cruising", "free_drive",
+                "roadwork", "caution_fog", "caution_slippery", "caution_wildlife", "caution_accident", "low_battery", "cold", "hot", "sport",
+            ),
             VoiceLines.Scene.entries.map { it.id },
         )
+        assertEquals(VoiceLines.Scene.entries.take(10).map { it.id }.toSet(), VoiceLines.LEGACY_SCENES)
+    }
+
+    @Test fun `뒤에 더한 장면 — 주의 구간, 공사, 배터리, 기온, 스포츠 모드`() {
+        val drive = DriveContext(gear = GearState.DRIVE)
+        assertEquals(VoiceLines.Scene.CAUTION_FOG, VoiceLines.scene(drive.copy(caution = Caution.FOG, traffic = Traffic(12)), seed = 1, local = false))
+        assertEquals(VoiceLines.Scene.TUNNEL, VoiceLines.scene(drive.copy(caution = Caution.WILDLIFE, ahead = RoadAhead.TUNNEL), seed = 1, local = false))
+        // 공사는 막히는 시간이 짧을 때만 따로 말한다.
+        assertEquals(VoiceLines.Scene.ROADWORK, VoiceLines.scene(drive.copy(traffic = Traffic(0, roadwork = true)), seed = 1, local = false))
+        assertEquals(VoiceLines.Scene.JAM, VoiceLines.scene(drive.copy(traffic = Traffic(12, roadwork = true)), seed = 1, local = false))
+        assertEquals(VoiceLines.Scene.ACCIDENT, VoiceLines.scene(drive.copy(traffic = Traffic(0, accident = true, roadwork = true)), seed = 1, local = false))
+        // 배터리 부족은 급한 말이라 곡을 가리지 않는다. 충전 중이거나 값이 0(전기차가 아님)이면 말하지 않는다.
+        assertEquals(VoiceLines.Scene.LOW_BATTERY, VoiceLines.scene(drive.copy(batteryPercent = 12), seed = 1, local = false))
+        assertNull(VoiceLines.scene(drive.copy(batteryPercent = 0), seed = 1, local = false))
+        assertEquals(VoiceLines.Scene.CHARGING, VoiceLines.scene(DriveContext(gear = GearState.PARK, chargerConnected = true, batteryPercent = 12), seed = 0, local = false))
+        // 기온과 스포츠 모드는 분위기라 곡의 절반에만.
+        assertEquals(VoiceLines.Scene.COLD, VoiceLines.scene(drive.copy(outsideCelsius = -3), seed = 0, local = false))
+        assertNull(VoiceLines.scene(drive.copy(outsideCelsius = -3), seed = 1, local = false))
+        assertEquals(VoiceLines.Scene.HOT, VoiceLines.scene(drive.copy(outsideCelsius = 31), seed = 0, local = false))
+        assertEquals(VoiceLines.Scene.SPORT, VoiceLines.scene(drive.copy(drivingMode = "SPORT", cruising = true), seed = 0, local = false))
+        assertNull(VoiceLines.scene(drive.copy(outsideCelsius = 18, drivingMode = "ECO"), seed = 0, local = false))
+    }
+
+    @Test fun `서버가 모르는 장면은 보내지 않는다`() {
+        val cold = DriveContext(gear = GearState.DRIVE, outsideCelsius = -3)
+        try {
+            // 🔴 옛 서버(장면 목록을 주지 않는다)에는 처음 열 가지만 보낸다 — 모르는 값은 400이다.
+            VoiceLines.serverScenes(emptyList())
+            assertNull(cold.toInput(LocalTime.NOON, seed = 0).scene)
+            assertEquals("tunnel", cold.copy(ahead = RoadAhead.TUNNEL).toInput(LocalTime.NOON, seed = 0).scene)
+            VoiceLines.serverScenes(VoiceLines.Scene.entries.map { it.id })
+            assertEquals("cold", cold.toInput(LocalTime.NOON, seed = 0).scene)
+        } finally {
+            VoiceLines.serverScenes(emptyList())
+        }
+    }
+
+    @Test fun `장면 조각이 없으면 장면 없이 고른다`() {
+        val drive = DriveContext(gear = GearState.DRIVE, caution = Caution.SLIPPERY, raining = true)
+        assertEquals(listOf("scene.caution_slippery.1"), VoiceLines.leadIds(drive, hour = 9, seed = 0))
+        assertEquals(listOf("open.rain.1"), VoiceLines.leadIds(drive, hour = 9, seed = 0, plain = true))
     }
 
     @Test fun `출발과 도착 조각은 기기 멘트와 같은 기준이다`() {

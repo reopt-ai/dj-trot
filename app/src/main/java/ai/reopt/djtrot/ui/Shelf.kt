@@ -156,7 +156,11 @@ private fun playFrom(player: Player?, ui: PlayerUi, items: List<MediaItem>, inde
     player ?: return
     val picked = items.getOrNull(index) ?: return
     if (picked.mediaId == ui.mediaId) {
-        if (player.isPlaying) player.pause() else player.play()
+        if (player.isPlaying) player.pause() else {
+            // 오래 멈춰 두면 서비스가 재생기를 내려놓는다(IDLE) — 다시 준비하고 튼다.
+            if (player.playbackState == Player.STATE_IDLE) player.prepare()
+            player.play()
+        }
         return
     }
     player.setMediaItems(items.map { MediaItem.Builder().setMediaId(it.mediaId).build() }, index, C.TIME_UNSET)

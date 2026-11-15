@@ -25,6 +25,7 @@ import ai.reopt.djtrot.dj.FallbackDjVoice
 import ai.reopt.djtrot.dj.SongOrders
 import ai.reopt.djtrot.dj.SongRequest
 import ai.reopt.djtrot.dj.StoryMic
+import ai.reopt.djtrot.dj.VoiceLines
 import ai.reopt.djtrot.dj.pauseSeconds
 import ai.reopt.djtrot.dj.toInput
 import ai.reopt.djtrot.playback.Catalog
@@ -256,6 +257,7 @@ class DjTrotApp : Application() {
     /** 서버 설정을 받았다 — 선택지 이름과 DJ 목록을 갈아 끼운다. 고른 DJ가 준비되지 않았으면 기본 DJ로 돌아간다. */
     private fun configured(config: DjConfig) {
         Labels.update(config)
+        VoiceLines.serverScenes(config.scenes)
         creationOpen.value = config.creation.open
         creationGuest.value = config.creation.open && config.creation.guest
         djs.value = config.djs.ifEmpty { listOf(DjInfo.DEFAULT) }

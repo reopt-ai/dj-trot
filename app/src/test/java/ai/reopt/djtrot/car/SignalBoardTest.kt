@@ -31,6 +31,17 @@ class SignalBoardTest {
         assertEquals("걸림", value(drive, "주행 중 화면 제한"))
         assertEquals("있음", value(drive, "동승자"))
         assertEquals("원활", value(drive.copy(traffic = null), "가는 길"))
+        assertEquals("공사 구간", value(drive.copy(traffic = Traffic(0, roadwork = true)), "가는 길"))
+        assertEquals("미끄러운 길", value(drive.copy(caution = Caution.SLIPPERY), "주의 구간"))
+        assertEquals("-3℃", value(drive.copy(outsideCelsius = -3), "바깥 기온"))
+        assertEquals("꽂힘", value(drive.copy(chargerConnected = true), "충전기"))
+    }
+
+    @Test fun `차가 주지 않는 값은 지원 안 함으로 보인다`() {
+        val drive = DriveContext(unsupported = setOf(SignalBoard.CRUISE, SignalBoard.COMPANY))
+        assertEquals(SignalBoard.UNSUPPORTED, value(drive, SignalBoard.CRUISE))
+        assertEquals(SignalBoard.UNSUPPORTED, value(drive, SignalBoard.COMPANY))
+        assertEquals("꺼짐", value(drive, SignalBoard.WIPER))
     }
 
     @Test fun `모든 신호가 어느 SDK에서 오는지 적혀 있다`() {

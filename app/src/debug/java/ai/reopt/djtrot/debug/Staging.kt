@@ -2,6 +2,7 @@ package ai.reopt.djtrot.debug
 
 import ai.reopt.djtrot.Said
 import ai.reopt.djtrot.car.Arrival
+import ai.reopt.djtrot.car.Caution
 import ai.reopt.djtrot.car.Departure
 import ai.reopt.djtrot.car.Destination
 import ai.reopt.djtrot.car.DriveContext
@@ -42,11 +43,14 @@ internal object Staging {
         "accident" to "가는 길에 사고 on|off",
         "roadwork" to "가는 길에 공사 on|off",
         "ahead" to "곧 지나는 곳 TUNNEL|TOLL|REST_AREA, none이면 없음",
+        "caution" to "곧 지나는 주의 구간 FOG|SLIPPERY|WILDLIFE|ACCIDENT, none이면 없음",
         "school" to "어린이보호구역 on|off",
         "free" to "목적지 없이 달림 on|off",
         "trip" to "시동 뒤 달린 시간(분)",
         "cruise" to "크루즈 컨트롤 on|off",
         "port" to "충전구 열림 on|off",
+        "charger" to "충전기 꽂힘 on|off",
+        "temp" to "바깥 기온(섭씨, 영하는 -5처럼)",
         "fog" to "앞 안개등 on|off",
         "rain" to "비(와이퍼) on|off",
         "company" to "동승자 on|off",
@@ -60,6 +64,7 @@ internal object Staging {
         "free" to { drive, on -> drive.copy(freeDrive = on) },
         "cruise" to { drive, on -> drive.copy(cruising = on) },
         "port" to { drive, on -> drive.copy(chargePortOpen = on) },
+        "charger" to { drive, on -> drive.copy(chargerConnected = on) },
         "fog" to { drive, on -> drive.copy(fog = on) },
         "rain" to { drive, on -> drive.copy(raining = on) },
         "company" to { drive, on -> drive.copy(company = on) },
@@ -71,7 +76,7 @@ internal object Staging {
     private val TRAFFIC = setOf("jam", "jam_road", "accident", "roadwork")
 
     /** 도착하면 내비가 지우는 값. */
-    val ROUTE: Set<String> = DESTINATION + TRAFFIC + "ahead"
+    val ROUTE: Set<String> = DESTINATION + TRAFFIC + "ahead" + "caution"
 
     /** 지금 덧씌운 값에 새 값을 더한다. [UNSET]은 그 키를 지운다. 모르는 키나 읽을 수 없는 값이면 [IllegalArgumentException]. */
     fun merge(staged: Map<String, String>, changes: Map<String, String>): Map<String, String> {
@@ -93,6 +98,8 @@ internal object Staging {
         staged["battery"]?.let { result = result.copy(batteryPercent = number("battery", it)) }
         staged["trip"]?.let { result = result.copy(tripMinutes = number("trip", it)) }
         staged["ahead"]?.let { result = result.copy(ahead = if (it == NONE) null else choice<RoadAhead>("ahead", it)) }
+        staged["caution"]?.let { result = result.copy(caution = if (it == NONE) null else choice<Caution>("caution", it)) }
+        staged["temp"]?.let { result = result.copy(outsideCelsius = requireNotNull(it.toIntOrNull()) { "temp 값은 정수입니다: '$it'" }) }
         for ((key, set) in FLAGS) staged[key]?.let { result = set(result, flag(key, it)) }
         if (staged.keys.any { it in DESTINATION }) result = result.copy(destination = destination(result.destination, staged))
         if (staged.keys.any { it in TRAFFIC }) result = result.copy(traffic = traffic(result.traffic, staged))

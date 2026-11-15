@@ -27,6 +27,25 @@ class DriveContextTest {
         assertNull(Traffic.of(jamSeconds = 200, road = "경부고속도로", accident = false, roadwork = false))
         assertEquals(Traffic(jamMinutes = 12, road = "경부고속도로"), Traffic.of(jamSeconds = 700, road = " 경부고속도로 ", accident = false, roadwork = false))
         assertEquals(Traffic(jamMinutes = 1, accident = true), Traffic.of(jamSeconds = 60, road = "", accident = true, roadwork = false))
+        // 공사 구간은 막히지 않아도 DJ가 한마디 한다.
+        assertEquals(Traffic(jamMinutes = 0, roadwork = true), Traffic.of(jamSeconds = 0, road = null, accident = false, roadwork = true))
+    }
+
+    @Test fun `충전기가 꽂혀 있으면 충전 중이고, 배터리 부족은 충전 중이 아닐 때만`() {
+        assertTrue(DriveContext(gear = GearState.PARK, chargerConnected = true).charging)
+        assertFalse(DriveContext(gear = GearState.DRIVE, chargerConnected = true).charging)
+        assertTrue(DriveContext(batteryPercent = 15).lowBattery)
+        assertFalse(DriveContext(batteryPercent = 16).lowBattery)
+        assertFalse(DriveContext(batteryPercent = 0).lowBattery)
+        assertFalse(DriveContext().lowBattery)
+        assertFalse(DriveContext(gear = GearState.PARK, chargePortOpen = true, batteryPercent = 5).lowBattery)
+    }
+
+    @Test fun `바깥 기온은 얼거나 한여름일 때만 말할 거리다`() {
+        assertTrue(DriveContext(outsideCelsius = 0).cold)
+        assertFalse(DriveContext(outsideCelsius = 1).cold)
+        assertTrue(DriveContext(outsideCelsius = 30).hot)
+        assertFalse(DriveContext().cold || DriveContext().hot)
     }
 
     @Test fun `즐겨찾기는 POI, 주소, 이름 순으로 맞춘다`() {

@@ -104,6 +104,8 @@ data class DjConfig(
     val creation: CreationPolicy = CreationPolicy(),
     /** 고를 수 있는 DJ. 예전 서버는 주지 않는다 — 그때는 기본 DJ만 쓴다. */
     val djs: List<DjInfo> = emptyList(),
+    /** 서버가 받는 길 위의 장면. 예전 서버는 주지 않는다 — 그때는 처음 열 가지만 보낸다. */
+    val scenes: List<String> = emptyList(),
 )
 
 /**

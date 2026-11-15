@@ -10,10 +10,13 @@ import ai.reopt.djtrot.dj.DjScript
 import ai.reopt.djtrot.dj.SongInfo
 import ai.reopt.djtrot.dj.SongRequest
 import ai.reopt.djtrot.dj.VoiceLines
+import ai.reopt.djtrot.dj.VoicePackStore
 import ai.reopt.djtrot.dj.toInput
 import ai.reopt.djtrot.ui.MainActivity
 import android.app.PendingIntent
 import android.content.Intent
+import android.media.AudioFocusRequest
+import android.media.AudioManager
 import android.util.Log
 import androidx.annotation.OptIn
 import androidx.core.net.toUri
@@ -62,6 +65,12 @@ import kotlinx.serialization.json.Json
  * - 🔑 DJ는 내비 안내 직전과 방향지시등이 켜진 동안 말을 미룬다(DriveContext.holdTalk).
  * - 🔴 앱 종료(onTaskRemoved): 재생 정지 → stopSelf → super 순서.
  * - 🔑 Pleos 서비스 수명 요건: onCreate에서 startService로 Started 상태를 만든다. 포그라운드 전환은 재생 시 Media3가 한다.
+ * - 🔴 쓰지 않으면 내려놓는다(Pleos 미사용 앱 BG→CCH 전환 가이드): 노래가 나오지 않은 채 [IDLE_STOP_MS](오래 멈춤)·[ENDED_STOP_MS](끝남·시작 전)가
+ *   지나면 재생기를 멈춰 오디오 포커스를 돌려주고 Started 상태를 푼다([retire]). 화면이 붙어 있지 않으면 서비스가 사라지고 프로세스는 cached로 간다.
+ *   차량 신호도 서비스가 사는 동안만 잡는다(`CarSignals.hold`).
+ * - 🔑 DJ의 목소리는 서버가 만든 음성이 먼저다 — 브리프의 조각 → 받아 둔 음성 팩 → 그래도 없을 때만 기기 TTS(Pleos TTS, 안 되면 Android TTS).
+ * - 🔑 음성 앞에 [PREROLL_US]의 묵음을 둔다(Pleos TTS·음성 안내 선행 묵음 가이드 — 첫 음절이 잘리지 않게, 데이터 단계에서).
+ * - 🔴 음악이 멈춘 채 조각만 들려줄 때(멘트 살펴보기)는 그 소리의 오디오 포커스를 따로 받는다([focusForClip]) — 포커스 없이 소리를 내지 않는다.
  */
 @OptIn(UnstableApi::class)
 class DjTrotLibraryService : MediaLibraryService() {
@@ -91,6 +100,13 @@ class DjTrotLibraryService : MediaLibraryService() {
     private var leadIn = false
     private var fade: Job? = null
     private var fadeTarget = 1f
+    /** 노래가 나오지 않는 채로 기다리는 중 — 다 지나면 서비스를 내려놓는다. */
+    private var idle: Job? = null
+    /** 이미 내려놓았다 — 다시 노래가 나올 때까지 기다리기를 되풀이하지 않는다. */
+    private var retired = false
+    private val audio by lazy { getSystemService(AudioManager::class.java) }
+    /** 음악 없이 조각만 틀 때 받은 오디오 포커스. */
+    private var clipFocus: AudioFocusRequest? = null
     private val unplayable = mutableSetOf<String>()
     /** 🔑 연속 실패 수 — 서버가 음원을 못 주는 상황이면 목록 전체를 돌지 않고 몇 곡 만에 멈춘다. */
     private var failuresInRow = 0
@@ -114,7 +130,7 @@ class DjTrotLibraryService : MediaLibraryService() {
         session = MediaLibrarySession.Builder(this, player, LibraryCallback())
             .setSessionActivity(openApp)
             .build()
-        app.car.start()
+        app.car.hold(this)
         // 🔑 광고 — 광고 조건에 맞는 장소에 가까워지면 광고 음악을 지금 곡 다음에 끼운다. 장소 판단은 기기 안에서 한다.
         //    노래가 나오는 중일 때만 끼우고(자동 재생 금지), 어린이보호구역에서는 끼우지 않는다.
         scope.launch {
@@ -138,9 +154,10 @@ class DjTrotLibraryService : MediaLibraryService() {
             app.orders.ready.collect { song ->
                 val item = catalog.resolve(MediaPath.Song(song.id).id) ?: return@collect
                 if (player.mediaItemCount == 0) player.setMediaItem(item) else player.addMediaItem(player.currentMediaItemIndex + 1, item)
+                // 화면에는 제목을 넣은 글을, 소리는 받아 둔 조각(제목 없이 말한다)을 먼저 쓴다. 조각이 없을 때만 기기 TTS가 글을 읽는다.
                 val line = "신청하신 노래 '${song.title}'가 완성됐어요. 다음 곡으로 들려 드릴게요."
                 app.dj.update { it.say(line) }
-                if (app.djTalks) launch { talk(line) }
+                if (app.djTalks) launch { talk(line, clips = listOfNotNull(app.voicePack.fragment(VoiceLines.SONG_READY_ID)?.file?.toUri()?.toString())) }
             }
         }
         // 목적지에 닿으면 노래는 그대로 두고 이번 길을 마무리하는 말을 한다.
@@ -190,6 +207,42 @@ class DjTrotLibraryService : MediaLibraryService() {
         // 백그라운드에서 시스템이 바인딩해 뜬 경우 시작 제한에 걸릴 수 있다 — 그때는 Media3의 포그라운드 처리에 맡긴다.
         runCatching { startService(Intent(this, DjTrotLibraryService::class.java)) }
             .onFailure { Log.i(TAG, "Started 상태 전환 생략: ${it.javaClass.simpleName}") }
+        // 시스템이 목록만 보려고 띄운 경우에도 Started로 남지 않게 — 노래를 틀지 않으면 곧 내려놓는다.
+        idleCheck()
+    }
+
+    /**
+     * 노래가 나오는지 다시 본다 — 나오지 않으면 기다렸다가 내려놓고([retire]), 나오면 기다리기를 그만둔다.
+     * 🔑 잠깐 멈춘 것(일시 정지)은 [IDLE_STOP_MS]까지 기다린다 — 곧 이어 들을 수 있다. 끝났거나 아직 틀지 않았으면 [ENDED_STOP_MS]만 기다린다.
+     */
+    private fun idleCheck() {
+        idle?.cancel()
+        idle = null
+        if (player.isPlaying || (player.playWhenReady && player.playbackState == Player.STATE_BUFFERING)) {
+            retired = false
+            return
+        }
+        if (retired) return
+        val paused = player.playbackState == Player.STATE_READY || player.playbackState == Player.STATE_BUFFERING
+        idle = scope.launch {
+            delay(if (paused) IDLE_STOP_MS else ENDED_STOP_MS)
+            if (!player.isPlaying) retire()
+        }
+    }
+
+    /**
+     * 쓰지 않는 서비스를 내려놓는다 — DJ를 멈추고, 재생기를 멈춰(IDLE) 오디오 포커스를 돌려주고, 멘트 재생기를 풀고, Started 상태를 푼다.
+     * 🔑 재생 목록과 위치는 재생기에 남는다. 다시 누르면 화면과 미디어 세션이 준비(prepare)부터 다시 한다.
+     *    화면이 아직 붙어 있으면 서비스는 살아 있고(바인딩), 화면도 떠나면 사라진다.
+     */
+    private fun retire() {
+        Log.i(TAG, "노래가 나오지 않아 재생 서비스를 내려놓아요")
+        retired = true
+        hush()
+        player.stop()
+        clip?.release()
+        clip = null
+        stopSelf()
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaLibrarySession = session
@@ -205,6 +258,8 @@ class DjTrotLibraryService : MediaLibraryService() {
     override fun onDestroy() {
         scope.cancel()
         app.voice.stop()
+        dropClipFocus()
+        app.car.release(this)
         clip?.release()
         session.release()
         player.release()
@@ -260,12 +315,13 @@ class DjTrotLibraryService : MediaLibraryService() {
             // DJ가 받아 둔 조각으로 진행을 알린다. 조각이 없거나 DJ 멘트가 꺼져 있으면 글로만 알린다.
             val (fragmentId, line) = when {
                 progress.granted -> "ad.outro.granted" to "광고를 ${progress.needed}번 들어서 생성권 한 장이 생겼어요!"
-                progress.limited -> null to "오늘 광고로 받을 수 있는 생성권을 다 받았어요. 내일 다시 받을 수 있어요."
+                progress.limited -> VoiceLines.AD_LIMITED_ID to "오늘 광고로 받을 수 있는 생성권을 다 받았어요. 내일 다시 받을 수 있어요."
                 progress.capped -> "ad.outro.capped" to "생성권이 가득 찼어요. 노래를 만들면 광고로 다시 받을 수 있어요."
                 progress.progress == 1 -> "ad.outro.1" to "광고 1/${progress.needed} · 두 번 더 들으면 생성권 한 장이에요."
                 else -> "ad.outro.2" to "광고 ${progress.progress}/${progress.needed} · 한 번만 더 들으면 생성권 한 장이에요."
             }
-            if (fragmentId != null && app.djTalks && player.isPlaying) moment(fragmentId, line) else app.dj.update { it.say(line) }
+            // 🔑 받아 둔 조각이 있을 때만 소리로 알린다 — 없으면 글로만 알린다(기기 TTS로 읽지 않는다).
+            if (app.djTalks && player.isPlaying && app.voicePack.fragment(fragmentId) != null) moment(fragmentId, line) else app.dj.update { it.say(line) }
         }
     }
 
@@ -308,9 +364,12 @@ class DjTrotLibraryService : MediaLibraryService() {
         if (!demo) introduced += 1
         app.syncVoicePack()
         val pick = VoiceLines.seedOf(song)
-        // 받아 둔 조각으로 낼 여는 말. 하나라도 빠졌으면 서버가 고른 것을 쓴다.
-        val leadIds = if (full) VoiceLines.leadIds(drive, now.hour, pick, always = demo) else emptyList()
-        val lead = leadIds.map(app.voicePack::fragment)
+        // 받아 둔 조각으로 낼 여는 말. 장면의 조각을 아직 받지 못했으면(새로 더한 장면) 장면 없이 시간대·날씨 인사로 고른다.
+        // 그래도 하나라도 빠졌으면 서버가 고른 것을 쓴다.
+        val pack = app.voicePack
+        val leadIds = if (!full) emptyList() else VoiceLines.leadIds(drive, now.hour, pick, always = demo).takeIf { ids -> ids.all { pack.fragment(it) != null } }
+            ?: VoiceLines.leadIds(drive, now.hour, pick, always = demo, plain = true)
+        val lead = leadIds.map(pack::fragment)
         val ownLead = lead.isNotEmpty() && lead.all { it != null }
         // 🔑 시뮬레이션 버튼 — 노래는 이미 나오는 중이다. 곡 소개를 되풀이하지 않고 바뀐 상황의 말만 한다.
         //    받아 둔 조각으로 낼 수 있으면 서버에 묻지 않고, 아니면 서버에 상황의 말만 청한다(ment=lead).
@@ -349,16 +408,18 @@ class DjTrotLibraryService : MediaLibraryService() {
                 return@launch
             }
             val mine = lead.filterNotNull().takeIf { ownLead }.orEmpty()
+            // 받아 둔 음성 팩의 제목 없는 곡 소개 — 서버가 음성을 주지 못할 때 같은 DJ 목소리로 잇는 조각.
+            val play = pack.fragment(VoiceLines.genericPlayId(song, pick))
+            // 받아 둔 조각만으로 말한다(여는 말 + 곡 소개). 브리프가 준 신청곡 제안이 있으면 함께 올린다.
+            suspend fun ownVoice(play: VoicePackStore.Fragment, request: SongRequest? = null) {
+                val parts = mine + play
+                val line = parts.joinToString(" ") { it.text }
+                app.dj.update { state -> state.say(line, now).copy(problem = null).let { if (request != null) it.suggest(request) else it } }
+                talk(line, item.mediaId, clips = parts.map { it.file.toUri().toString() })
+            }
             if (brief == null) {
                 // 서버가 닿지 않는다 — 받아 둔 조각이 있으면 같은 목소리로, 없으면 기기 템플릿으로.
-                val play = app.voicePack.fragment(VoiceLines.genericPlayId(song, pick))
-                if (play != null) {
-                    val parts = mine + play
-                    val line = parts.joinToString(" ") { it.text }
-                    app.dj.update { it.say(line, now).copy(problem = null) }
-                    talk(line, item.mediaId, clips = parts.map { it.file.toUri().toString() })
-                    return@launch
-                }
+                if (play != null) return@launch ownVoice(play)
                 val line = DjScript.intro(song, drive, now, seed)
                 app.dj.update { it.say(line, now).copy(problem = null) }
                 talk(line, item.mediaId)
@@ -372,10 +433,19 @@ class DjTrotLibraryService : MediaLibraryService() {
                 return@launch
             }
             val mentions = song.title.isNotBlank() && song.title.trim() in brief.script
+            val voiceUrl = brief.voiceUrl?.let(app.api::absolute)
+            // 🔑 서버가 음성을 주지 못했다(팩이 꺼져 있다, 오늘 합성 상한, 곡 소개 조각이 아직 없다) — 기기 TTS로 읽기 전에 받아 둔 음성 팩으로 말한다.
+            if (voiceUrl == null && play != null) return@launch ownVoice(play, SongRequest.of(brief.song))
+            // 통문장 음성이 곡을 말하지 않으면, 받아 둔 곡 소개 조각을 뒤에 이어 같은 DJ 목소리로 끝낸다.
+            if (voiceUrl != null && !mentions && play != null) {
+                val line = "${brief.script} ${play.text}"
+                app.dj.update { it.say(line, now).copy(problem = null).suggest(SongRequest.of(brief.song)) }
+                talk(line, item.mediaId, clips = listOf(voiceUrl, play.file.toUri().toString()))
+                return@launch
+            }
             val line = if (mentions) brief.script else "${brief.script} ${DjScript.play(song, seed)}"
             app.dj.update { it.say(line, now).copy(problem = null).suggest(SongRequest.of(brief.song)) }
-            val voiceUrl = brief.voiceUrl
-            talk(line, item.mediaId, clips = listOfNotNull(voiceUrl?.takeIf { mentions }?.let(app.api::absolute)))
+            talk(line, item.mediaId, clips = listOfNotNull(voiceUrl?.takeIf { mentions }))
         }
     }
 
@@ -384,6 +454,7 @@ class DjTrotLibraryService : MediaLibraryService() {
      * 🔑 내비 안내 직전·차선 변경 중·말로 사연을 듣는 중이면 풀릴 때까지 기다리고, [HOLD_MAX_MS]가 넘으면 읽지 않는다.
      *    풀린 뒤에도 [SETTLE_MS] 쉬고 말한다 — 안내 음성이 끝나자마자 끼어들지 않는다.
      *    기다리는 사이 곡이 바뀌었거나 멈췄으면 읽지 않는다.
+     * 🔑 [clips](서버가 만든 음성 — 브리프의 조각, 받아 둔 음성 팩)가 있으면 그것을 튼다. 하나도 없을 때만 기기 TTS가 [line]을 읽는다.
      * 🔑 기기 TTS는 음악을 먼저 줄이고 [LEAD_IN_MS] 뒤에 말한다(라디오 진행처럼, Pleos 음성 앞 여백 권장).
      */
     private suspend fun talk(line: String, itemId: String? = null, clips: List<String> = emptyList()) {
@@ -433,7 +504,29 @@ class DjTrotLibraryService : MediaLibraryService() {
         clip?.stop()
         clipOn = false
         leadIn = false
+        dropClipFocus()
         duck()
+    }
+
+    /**
+     * 멘트 조각을 틀어도 되는가 — 노래가 나오는 중이면 음악이 오디오 포커스를 쥐고 있어 그 위에 얹는다.
+     * 🔴 노래가 멈춰 있으면(멘트 살펴보기) 이 소리의 포커스를 잠깐 받는다. 받지 못하면(통화 중 등) 틀지 않는다(Pleos 오디오 포커스 가이드: 모든 스트림은 재생 전에 포커스를 청한다).
+     */
+    private fun focusForClip(): Boolean {
+        if (player.isPlaying || clipFocus != null) return true
+        val request = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT)
+            .setAudioAttributes(android.media.AudioAttributes.Builder().setUsage(android.media.AudioAttributes.USAGE_MEDIA).setContentType(android.media.AudioAttributes.CONTENT_TYPE_SPEECH).build())
+            // 다른 소리가 포커스를 가져가면 멘트를 바로 멈춘다.
+            .setOnAudioFocusChangeListener { change -> if (change < 0) hush() }
+            .build()
+        if (audio.requestAudioFocus(request) != AudioManager.AUDIOFOCUS_REQUEST_GRANTED) return false
+        clipFocus = request
+        return true
+    }
+
+    private fun dropClipFocus() {
+        clipFocus?.let { runCatching { audio.abandonAudioFocusRequest(it) } }
+        clipFocus = null
     }
 
     /** 오래 멈췄다 같은 곡을 이어 틀면 신청곡 제안만 새로 받는다. 곡 중간이라 DJ는 말하지 않는다. */
@@ -477,22 +570,27 @@ class DjTrotLibraryService : MediaLibraryService() {
                     override fun onPlaybackStateChanged(state: Int) {
                         if (state == Player.STATE_ENDED || state == Player.STATE_IDLE) {
                             clipOn = false
+                            dropClipFocus()
                             duck()
                         }
                     }
                     override fun onPlayerError(error: PlaybackException) {
                         clipOn = false
+                        dropClipFocus()
                         duck()
-                        app.dj.value.line?.let(app.voice::speak)
+                        // 음성을 받지 못했다 — 노래가 나오는 중이면 같은 글을 기기 TTS가 읽는다.
+                        if (player.isPlaying) app.dj.value.line?.let(app.voice::speak)
                     }
                 })
             }
+        if (!focusForClip()) return
         clipOn = true
         duck()
         // 🔑 조각은 끝의 쉼이 짧다(실측 중앙값 0.15초) — 그대로 이으면 문장이 붙어 들린다. 조각 사이에 [CLIP_GAP_US]만큼 숨을 넣는다.
         val sources = DefaultMediaSourceFactory(authorizedSource())
+        // 🔑 맨 앞에는 선행 묵음([PREROLL_US])을 둔다 — 출력 경로가 열리는 사이 첫 음절이 잘리지 않게.
         voice.setMediaSources(urls.flatMapIndexed { index, url ->
-            listOfNotNull(if (index > 0) SilenceMediaSource(CLIP_GAP_US) else null, sources.createMediaSource(MediaItem.fromUri(url)))
+            listOf(SilenceMediaSource(if (index > 0) CLIP_GAP_US else PREROLL_US), sources.createMediaSource(MediaItem.fromUri(url)))
         })
         voice.prepare()
         voice.play()
@@ -515,9 +613,11 @@ class DjTrotLibraryService : MediaLibraryService() {
                 playingAd = null
                 heardAd(ad)
             }
+            idleCheck()
         }
 
         override fun onIsPlayingChanged(isPlaying: Boolean) {
+            idleCheck()
             if (!isPlaying) return
             failuresInRow = 0
             app.dj.update { it.copy(problem = null) }
@@ -688,6 +788,12 @@ class DjTrotLibraryService : MediaLibraryService() {
         val PRETTY = Json(DjTrotApi.json) { prettyPrint = true }
         /** 멘트 조각 사이의 숨(마이크로초). */
         const val CLIP_GAP_US = 350_000L
+        /** 멘트 음성 맨 앞의 선행 묵음(마이크로초) — Pleos 권장 150~200ms. */
+        const val PREROLL_US = 180_000L
+        /** 멈춰 둔 채 이만큼 지나면 서비스를 내려놓는다. */
+        const val IDLE_STOP_MS = 5 * 60_000L
+        /** 재생이 끝났거나 아직 틀지 않은 채 이만큼 지나면 서비스를 내려놓는다. */
+        const val ENDED_STOP_MS = 60_000L
 
         const val FADE_MS = 300L
         const val FADE_STEPS = 10
