@@ -2,4 +2,6 @@
 <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
     <background android:drawable="@color/dj_icon_background" />
     <foreground android:drawable="@drawable/ic_launcher_foreground" />
+    <!-- 테마 아이콘(Android 13+) — 같은 전경을 단색으로 쓴다. 릴리즈 lint(MonochromeLauncherIcon)가 요구한다. -->
+    <monochrome android:drawable="@drawable/ic_launcher_foreground" />
 </adaptive-icon>

@@ -23,6 +23,9 @@ val buildTime: String = LocalDateTime.now().format(DateTimeFormatter.ofPattern("
 val djTrotDemo = providers.gradleProperty("djtrot.demo").orElse("true")
 val pleosClientId = providers.gradleProperty("djtrot.pleosClientId").orElse("")
 val pleosClientSecret = providers.gradleProperty("djtrot.pleosClientSecret").orElse("")
+// 🔑 릴리즈 서명 — 키스토어와 비밀번호는 저장소 밖(~/.gradle/gradle.properties의 djtrot.release*)에 둔다.
+//    없으면 서명하지 않은 APK가 나온다(설치되지 않는다). 제출용은 `tools/release.sh`로 만든다.
+val releaseStoreFile = providers.gradleProperty("djtrot.releaseStoreFile").orNull
 
 android {
     namespace = "ai.reopt.djtrot"
@@ -45,9 +48,19 @@ android {
         buildConfigField("String", "PLEOS_CLIENT_SECRET", "\"${pleosClientSecret.get()}\"")
     }
 
+    signingConfigs {
+        if (releaseStoreFile != null) create("release") {
+            storeFile = file(releaseStoreFile)
+            storePassword = providers.gradleProperty("djtrot.releaseStorePassword").get()
+            keyAlias = providers.gradleProperty("djtrot.releaseKeyAlias").get()
+            keyPassword = providers.gradleProperty("djtrot.releaseKeyPassword").get()
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
+            signingConfig = signingConfigs.findByName("release")
         }
     }
 
