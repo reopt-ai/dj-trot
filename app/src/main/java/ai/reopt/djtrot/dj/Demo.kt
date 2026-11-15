@@ -161,6 +161,7 @@ enum class LineGroup(val title: String, private val prefixes: List<String>) {
     ETA("남은 시간", listOf("eta.")),
     TRIP("출발·도착", listOf("depart.", "waypoint", "arrive.")),
     PLAY("곡 소개", listOf("play.")),
+    NOTICE("광고·알림", listOf("ad.", "song.")),
     ;
 
     fun has(id: String): Boolean = prefixes.any(id::startsWith)

@@ -88,9 +88,12 @@ class DemoTest {
         assertFalse(press("signal", "signal").apply(DriveContext()).holdTalk)
     }
 
-    @Test fun `멘트 살펴보기는 조각을 다섯 묶음으로 나눈다`() {
-        val ids = listOf("open.rain.1", "open.parked.2", "scene.jam.2", "eta.home.25", "depart.place.long", "waypoint", "arrive.short", "play.3", "play.request.fresh")
-        assertEquals(listOf(2, 1, 1, 3, 2), LineGroup.entries.map { group -> ids.count(group::has) })
+    @Test fun `멘트 살펴보기는 조각을 여섯 묶음으로 나누고 빠지는 조각이 없다`() {
+        val ids = listOf(
+            "open.rain.1", "open.parked.2", "scene.jam.2", "eta.home.25", "depart.place.long", "waypoint", "arrive.short", "play.3", "play.request.fresh",
+            "ad.intro.1", "ad.outro.limited", "song.ready",
+        )
+        assertEquals(listOf(2, 1, 1, 3, 2, 3), LineGroup.entries.map { group -> ids.count(group::has) })
         assertTrue(ids.all { id -> LineGroup.entries.count { it.has(id) } == 1 })
     }
 
