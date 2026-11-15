@@ -652,9 +652,16 @@ private fun PremiereAct(song: TrotSong, request: SongRequest, cover: Uri?, playi
             Modifier
                 .weight(1f)
                 .fillMaxWidth()
-                .djCard(radius = 32.dp, background = DjColors.Selected, line = DjColors.Gold.copy(alpha = 0.7f))
-                .background(Brush.verticalGradient(listOf(DjColors.Gold.copy(alpha = 0.2f), Color.Transparent)))
-                .padding(horizontal = 36.dp, vertical = 26.dp),
+                // 🔑 검은 유리판 — 뒤의 무대가 비치는 반투명 검정에, 위는 밝고 아래는 어두운 결을 얹어 도톰하게 보이게 한다.
+                //    테는 위쪽이 밝은 금빛에서 아래로 가라앉고, 안쪽에 가는 빛줄을 한 줄 더 둔다(모서리가 깎인 판처럼).
+                .shadow(30.dp, PREMIERE_CARD, ambientColor = Color.Black, spotColor = Color.Black)
+                .clip(PREMIERE_CARD)
+                .background(Color.Black.copy(alpha = 0.62f))
+                .background(Brush.verticalGradient(0f to Color.White.copy(alpha = 0.09f), 0.22f to Color.White.copy(alpha = 0.02f), 0.6f to Color.Transparent, 1f to Color.Black.copy(alpha = 0.28f)))
+                .border(1.5.dp, Brush.verticalGradient(0f to DjColors.Gold2.copy(alpha = 0.95f), 0.45f to DjColors.Gold.copy(alpha = 0.35f), 1f to DjColors.GoldDeep.copy(alpha = 0.7f)), PREMIERE_CARD)
+                .padding(3.dp)
+                .border(1.dp, Brush.verticalGradient(0f to Color.White.copy(alpha = 0.16f), 0.3f to Color.Transparent, 1f to Color.Transparent), RoundedCornerShape(29.dp))
+                .padding(horizontal = 33.dp, vertical = 23.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             // 표지 — 뒤로 금빛 빛무리가 번지고, 금빛 테를 두른다.
@@ -698,6 +705,9 @@ private fun PremiereAct(song: TrotSong, request: SongRequest, cover: Uri?, playi
         StudioAction(DjIcons.Sparkle, "한 곡 더 만들기", "새 사연으로", enabled = true, onClick = onAgain)
     }
 }
+
+/** 첫 방송 카드의 모서리. */
+private val PREMIERE_CARD = RoundedCornerShape(32.dp)
 
 /** 첫 방송 표지의 한 변. */
 private val PREMIERE_COVER = 300.dp
