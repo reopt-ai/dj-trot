@@ -117,7 +117,8 @@ fun SongShelf(app: DjTrotApp, shelf: ShelfMemory, ui: PlayerUi, player: Player?,
     val order by app.orders.current.collectAsStateWithLifecycle()
     val guestOpen by app.creationGuest.collectAsStateWithLifecycle()
     // 🔑 시연 모드면 연결하지 않아도 이 차가 시연으로 만든 곡이 내 노래에 보인다.
-    val connected = connection is Connection.Connected || guestOpen
+    val demoLinked by app.demoLinked.collectAsStateWithLifecycle()
+    val connected = connection is Connection.Connected || guestOpen || demoLinked
 
     // 새 노래가 완성되거나 연결이 바뀌면 내 노래를 다시 받는다.
     LaunchedEffect(order?.state == "ready", connected) { states.remove(Shelf.MINE) }

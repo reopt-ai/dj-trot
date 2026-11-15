@@ -1,5 +1,6 @@
 package ai.reopt.djtrot.ui
 
+import ai.reopt.djtrot.BuildConfig
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.SpanStyle
@@ -154,7 +155,9 @@ private fun RequestAct(app: DjTrotApp, suggestion: SongRequest, djName: String, 
     val guestOpen by app.creationGuest.collectAsStateWithLifecycle()
     val connected = connection is Connection.Connected
     // 🔑 시연 모드 — 휴대폰을 연결하지 않은 차도 생성권 없이 만든다. 연결한 차는 그대로 생성권을 쓴다.
-    val guest = !connected && guestOpen
+    // 시연 연결(휴대폰 없이 체험)도 손님으로 만든다 — 만들 수 있는지는 서버의 시연 모드가 정한다.
+    val demoLinked by app.demoLinked.collectAsStateWithLifecycle()
+    val guest = !connected && (guestOpen || demoLinked)
     val parked = !driving && !drive.noSetup
     // 🔑 고르지 않은 칸은 DJ의 제안을 따른다. 손으로 고른 칸은 제안이 바뀌어도 그대로 둔다.
     var topic by rememberSaveable { mutableStateOf<String?>(null) }
@@ -177,7 +180,7 @@ private fun RequestAct(app: DjTrotApp, suggestion: SongRequest, djName: String, 
             else Text("사연을 넣고 고르면 노래가 돼요", style = body(DjType.LabelS, DjColors.Muted, FontWeight.SemiBold), maxLines = 1)
         }
         Spacer(Modifier.height(18.dp))
-        Column(Modifier.weight(1f).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(18.dp)) {
+        Column(Modifier.weight(1f).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             // 사연 — 이 화면의 주인공이다. DJ가 이 길을 보고 먼저 써 두고, 말하거나 예시를 눌러 바꾼다.
             val mine = dj.freshSpoken() != null
             val listening = hearing.listening
@@ -186,7 +189,7 @@ private fun RequestAct(app: DjTrotApp, suggestion: SongRequest, djName: String, 
                     .fillMaxWidth()
                     .djCard(radius = 28.dp, background = DjColors.CardRaised, line = if (listening) DjColors.Gold else DjColors.GoldRing)
                     .background(Brush.verticalGradient(listOf(DjColors.Cream.copy(alpha = 0.85f), Color.Transparent)))
-                    .padding(horizontal = 30.dp, vertical = 20.dp),
+                    .padding(horizontal = 30.dp, vertical = 16.dp),
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text("이 길의 사연", style = headline(DjType.TitleS, DjColors.Gold2, FontWeight.ExtraBold), modifier = Modifier.weight(1f), maxLines = 1)
@@ -242,7 +245,7 @@ private fun RequestAct(app: DjTrotApp, suggestion: SongRequest, djName: String, 
             ChoiceGroup("어떤 가락", choices.style, request.style, perRow = 3, enabled = parked) { style = it }
             ChoiceGroup("누구 목소리", choices.voice, request.voice, perRow = 2, enabled = parked) { voice = it }
         }
-        Spacer(Modifier.height(18.dp))
+        Spacer(Modifier.height(12.dp))
         failed?.let {
             ErrorNotice(it.problem ?: "노래를 만들지 못했어요.", action = "닫기", onAction = app.orders::dismiss)
             Spacer(Modifier.height(12.dp))
@@ -262,7 +265,7 @@ private fun RequestAct(app: DjTrotApp, suggestion: SongRequest, djName: String, 
             !connected -> StudioAction(
                 icon = DjIcons.Phone,
                 text = "휴대폰 연결하고 만들기",
-                hint = if (parked) "PIN·QR로 1분" else "정차하면 연결할 수 있어요",
+                hint = if (!parked) "정차하면 연결할 수 있어요" else if (BuildConfig.DEMO) "시연 · 휴대폰 없이 흐름을 체험해요" else "PIN·QR로 1분",
                 enabled = parked,
             ) { context.startActivity(Intent(context, ConnectActivity::class.java)) }
             else -> StudioAction(
@@ -400,7 +403,7 @@ private fun StudioAction(icon: ImageVector, text: String, hint: String, enabled:
             Modifier
                 .pressScale(source, depth = 0.97f)
                 .fillMaxWidth()
-                .height(116.dp)
+                .height(100.dp)
                 .shadow(18.dp, shape, ambientColor = DjColors.Gold, spotColor = DjColors.GoldDeep)
                 .clip(shape)
                 .border(1.5.dp, DjColors.SatinEdge, shape)

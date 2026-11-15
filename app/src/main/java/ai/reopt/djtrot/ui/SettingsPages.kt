@@ -237,10 +237,15 @@ internal fun ColumnScope.AccountPage(app: DjTrotApp, drive: DriveContext, drivin
     val tokens by app.orders.tokens.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val connected = connection is Connection.Connected
+    val demoLinked by app.demoLinked.collectAsStateWithLifecycle()
     Column(Modifier.weight(1f).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         GroupTitle("휴대폰 연결", DjIcons.Phone)
-        InfoRow("상태", if (connected) "연결됨" else "연결 안 됨", strong = connected)
-        if (!connected) {
+        InfoRow("상태", if (connected) "연결됨" else if (demoLinked) "시연 연결됨" else "연결 안 됨", strong = connected || demoLinked)
+        if (!connected && demoLinked) {
+            // 🔑 시연 연결 — 휴대폰 없이 흐름만 체험한 상태다. 실제 계정은 묶여 있지 않다.
+            PillButton("시연 연결 끊기", "시연 연결을 지우고 연결 전으로 돌아가요", selected = false, Modifier.fillMaxWidth(), height = 84.dp, icon = DjIcons.Refresh) { app.linkDemo(false) }
+            Note("시연 연결이에요. 실제 계정은 연결되지 않았고, 실제 서비스에서는 휴대폰 로그인으로 연결해요.")
+        } else if (!connected) {
             val blocked = driving || drive.noSetup
             PillButton(if (blocked) "정차하면 연결할 수 있어요" else "휴대폰 연결하기", "QR로 휴대폰과 연결해요", selected = !blocked, Modifier.fillMaxWidth(), height = 84.dp) {
                 if (!blocked) context.startActivity(Intent(context, ConnectActivity::class.java))

@@ -177,7 +177,20 @@ class DjTrotApp : Application() {
     val catalog by lazy { Catalog(api) { songAccess } }
 
     /** 드라이브 노래 자격 — 연결한 차는 기기 세션, 아니면 시연 손님 ID. */
-    val songAccess by lazy { SongAccess(account, ::guestId, { creationGuest.value }) }
+    val songAccess by lazy { SongAccess(account, ::guestId, { creationGuest.value || demoLinked.value }) }
+
+    /**
+     * 시연 연결 — 휴대폰 없이 연결 흐름만 체험한 상태(연결 화면의 "승인된 것으로 넘어가기"). 기기에만 저장한다.
+     * 🔑 실제 계정은 묶이지 않는다. 노래는 시연 손님 ID로 만들고 읽으며, 만들 수 있는지는 서버의 시연 모드가 정한다.
+     *    시연 빌드(`djtrot.demo`)에서만 켤 수 있다.
+     */
+    val demoLinked by lazy { MutableStateFlow(BuildConfig.DEMO && getSharedPreferences(PREFS, MODE_PRIVATE).getBoolean(KEY_DEMO_LINK, false)) }
+
+    fun linkDemo(on: Boolean) {
+        if (!BuildConfig.DEMO) return
+        demoLinked.value = on
+        getSharedPreferences(PREFS, MODE_PRIVATE).edit { putBoolean(KEY_DEMO_LINK, on) }
+    }
 
     /**
      * 시연 손님 ID — 처음 쓸 때 만들어 기기에 둔다. 🔑 데이터 지우기에도 남긴다(이 차가 시연으로 만든 곡을 다시 찾는 열쇠).
@@ -401,5 +414,6 @@ class DjTrotApp : Application() {
         private const val KEY_DJ = "dj_id"
         private const val KEY_SERVER = "server"
         private const val KEY_DEVELOPER = "developer"
+        private const val KEY_DEMO_LINK = "demo_link"
     }
 }
