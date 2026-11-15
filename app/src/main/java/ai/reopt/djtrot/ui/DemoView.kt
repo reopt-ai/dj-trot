@@ -42,6 +42,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -232,9 +233,22 @@ internal fun DemoView(
                     AboutPage(app)
                 }
                 SettingsPage.LINES -> {
-                    val all = remember(djId) { lines() }
-                    DetailHeader(DjIcons.Mic, shown.title, "누르면 DJ 목소리로 들려 드려요", onBack = { onPage(SettingsPage.HOME) }) {
-                        StatusPill(DjIcons.VolumeOn, "${all.size}개", on = all.isNotEmpty())
+                    // 🔑 DJ를 바꾸면 그 DJ의 팩을 서버와 맞춘 뒤 목록을 다시 읽는다 — 받아 둔 사본이 옛것이면 멘트 수가 DJ마다 달라 보인다.
+                    var all by remember(djId) { mutableStateOf(lines()) }
+                    LaunchedEffect(djId) {
+                        runCatching { app.voicePack.sync() }
+                        all = lines()
+                    }
+                    // 준비된 DJ를 차례로 돈다(무대의 DJ 메뉴와 같은 순서). 준비된 DJ가 하나뿐이면 버튼을 그리지 않는다.
+                    val ready = djs.filter { it.ready }
+                    val next = ready.getOrNull((ready.indexOfFirst { it.id == djId } + 1) % ready.size.coerceAtLeast(1))?.takeIf { it.id != djId }
+                    DetailHeader(DjIcons.Mic, shown.title, "$djName · 눌러서 들어 봐요", onBack = { onPage(SettingsPage.HOME) }) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            StatusPill(DjIcons.VolumeOn, "${all.size}개", on = all.isNotEmpty())
+                            if (next != null) {
+                                PillButton("DJ 변경", "${next.name}의 멘트로 바꿔요", selected = false, Modifier.width(210.dp), icon = DjIcons.Mic) { app.selectDj(next.id) }
+                            }
+                        }
                     }
                     LineBrowser(all, onLine, Modifier.weight(1f))
                 }
