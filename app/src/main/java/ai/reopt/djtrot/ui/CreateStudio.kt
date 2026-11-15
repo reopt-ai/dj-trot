@@ -1,5 +1,8 @@
 package ai.reopt.djtrot.ui
 
+import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.SpanStyle
 import ai.reopt.djtrot.dj.StoryBuilder
 import androidx.compose.foundation.horizontalScroll
 import ai.reopt.djtrot.DjTrotApp
@@ -170,6 +173,8 @@ private fun RequestAct(app: DjTrotApp, suggestion: SongRequest, djName: String, 
             Text("트롯 제작실", style = headline(DjType.TitleS, DjColors.Gold2), modifier = Modifier.weight(1f), maxLines = 1)
             if (guest) Pill(DjIcons.Sparkle, "시연 · 무료")
             else if (connected && tokens != null) Pill(DjIcons.Note, listOfNotNull("생성권 ${tokens}장", adLine).joinToString(" · "))
+            // 알약이 없을 때는 이 칸에서 하는 일을 한 줄로 알린다.
+            else Text("사연을 넣고 고르면 노래가 돼요", style = body(DjType.LabelS, DjColors.Muted, FontWeight.SemiBold), maxLines = 1)
         }
         Spacer(Modifier.height(18.dp))
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(18.dp)) {
@@ -190,9 +195,9 @@ private fun RequestAct(app: DjTrotApp, suggestion: SongRequest, djName: String, 
                 Spacer(Modifier.height(14.dp))
                 when {
                     listening && (driving || hearing.heard.isBlank()) -> Text("듣고 있어요. 사연을 말씀해 주세요", style = headline(DjType.TitleS, DjColors.Gold2, FontWeight.Bold))
-                    listening -> Text("“${hearing.heard}”", style = headline(DjType.TitleS, DjColors.Gold2, FontWeight.Bold), maxLines = 3, overflow = TextOverflow.Ellipsis)
+                    listening -> Text(quoted(hearing.heard), style = headline(DjType.TitleS, DjColors.Gold2, FontWeight.Bold), maxLines = 3, overflow = TextOverflow.Ellipsis)
                     driving -> Text("정차하면 사연을 보여 드릴게요", style = body(DjType.BodyM, DjColors.Muted))
-                    else -> Text("“${request.story}”", style = headline(DjType.TitleS, DjColors.Ink, FontWeight.Bold), maxLines = 3, overflow = TextOverflow.Ellipsis)
+                    else -> Text(quoted(request.story), style = headline(DjType.TitleS, DjColors.Ink, FontWeight.Bold), maxLines = 3, overflow = TextOverflow.Ellipsis)
                 }
                 Spacer(Modifier.height(16.dp))
                 // 🔑 말로 넣는 사연(Pleos SpeechToText) — 주행 중에도 손 대신 말로 넣을 수 있다. 이 카드에서 가장 큰 버튼이다.
@@ -213,11 +218,22 @@ private fun RequestAct(app: DjTrotApp, suggestion: SongRequest, djName: String, 
                 //    제작실 전체가 한 화면에 들어오게 이름표 없이 버튼만 둔다.
                 if (parked && !listening) {
                     Spacer(Modifier.height(14.dp))
-                    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        StoryBuilder.IDEAS.forEach { (label, story) ->
-                            Pill(null, label, active = dj.freshSpoken() == story, onClick = { app.wish(story) })
+                    val ideas = rememberScrollState()
+                    Box {
+                        Row(Modifier.horizontalScroll(ideas), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            // 넣은 사연이 있으면 되돌리기를 맨 앞에 둔다 — 밀지 않아도 보이게.
+                            if (mine) Pill(DjIcons.Refresh, "DJ 추천으로", onClick = { app.dj.update { it.forget().copy(suggestion = null, suggestedAt = null) } })
+                            StoryBuilder.IDEAS.forEach { (label, story) ->
+                                Pill(null, label, active = dj.freshSpoken() == story, onClick = { app.wish(story) })
+                            }
                         }
-                        if (mine) Pill(DjIcons.Refresh, "DJ 추천으로", onClick = { app.dj.update { it.forget().copy(suggestion = null, suggestedAt = null) } })
+                        // 🔑 옆으로 더 있다는 표시 — 잘린 쪽 가장자리를 카드 색으로 흐린다.
+                        if (ideas.canScrollForward) {
+                            Box(Modifier.matchParentSize().background(Brush.horizontalGradient(0.8f to Color.Transparent, 0.95f to IDEA_FADE)), contentAlignment = Alignment.CenterEnd) {
+                                Icon(DjIcons.ChevronRight, contentDescription = "옆으로 밀면 더 있어요", tint = DjColors.Gold, modifier = Modifier.size(36.dp))
+                            }
+                        }
+                        if (ideas.canScrollBackward) Box(Modifier.align(Alignment.CenterStart).matchParentSize().background(Brush.horizontalGradient(0f to IDEA_FADE, 0.18f to Color.Transparent)))
                     }
                 }
             }
@@ -305,11 +321,32 @@ private fun MicButton(listening: Boolean, text: String, hint: String, onClick: (
     }
 }
 
+/** 예시 사연 줄의 가장자리를 흐리는 색 — 사연 카드의 바탕과 같다. */
+private val IDEA_FADE = Color(0xFF1D180F)
+
+/** 사연을 금빛 따옴표로 감싼다 — 따옴표가 글보다 먼저 눈에 들어와 "누군가의 말"임을 알린다. */
+private fun quoted(story: String) = buildAnnotatedString {
+    withStyle(SpanStyle(color = DjColors.Gold)) { append("“") }
+    append(story)
+    withStyle(SpanStyle(color = DjColors.Gold)) { append("”") }
+}
+
 /** 고르기 한 묶음 — 이름표와 같은 폭의 큰 칩들. 한 줄에 [perRow]개씩 놓는다. */
 @Composable
 private fun ChoiceGroup(label: String, options: List<Choice>, selected: String, perRow: Int, enabled: Boolean, onSelect: (String) -> Unit) {
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Text(label, style = body(DjType.LabelM, DjColors.Muted, FontWeight.SemiBold))
+        // 이름표 — 금빛 점과 이름, 흐려지는 선, 오른쪽 끝에 지금 고른 값. 무엇을 골랐는지 묶음을 훑지 않아도 보인다.
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.size(8.dp).clip(CircleShape).background(DjColors.Gold))
+            Spacer(Modifier.width(10.dp))
+            Text(label, style = body(DjType.LabelM, DjColors.Ink, FontWeight.Bold), maxLines = 1)
+            Spacer(Modifier.width(12.dp))
+            Box(Modifier.weight(1f).height(1.dp).background(Brush.horizontalGradient(listOf(DjColors.LineStrong, Color.Transparent))))
+            options.firstOrNull { it.id == selected }?.let {
+                Spacer(Modifier.width(12.dp))
+                Text(it.label, style = body(DjType.LabelM, DjColors.Gold2, FontWeight.Bold), maxLines = 1)
+            }
+        }
         options.chunked(perRow).forEach { row ->
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 row.forEach { option -> ChoiceChip(option.label, option.id == selected, enabled, Modifier.weight(1f)) { onSelect(option.id) } }
@@ -334,12 +371,19 @@ private fun ChoiceChip(text: String, selected: Boolean, enabled: Boolean, modifi
             .padding(horizontal = 10.dp),
         contentAlignment = Alignment.Center,
     ) {
-        Text(
-            text,
-            style = body(DjType.LabelM, if (selected) DjColors.Gold2 else if (enabled) DjColors.Ink else DjColors.Faint, if (selected) FontWeight.Bold else FontWeight.Medium),
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            // 고른 칩은 색만이 아니라 금빛 점으로도 알린다.
+            if (selected) {
+                Box(Modifier.size(10.dp).clip(CircleShape).background(DjColors.Gold2))
+                Spacer(Modifier.width(8.dp))
+            }
+            Text(
+                text,
+                style = body(DjType.LabelM, if (selected) DjColors.Gold2 else if (enabled) DjColors.Ink else DjColors.Faint, if (selected) FontWeight.Bold else FontWeight.Medium),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
     }
 }
 
@@ -386,15 +430,21 @@ private fun StudioAction(icon: ImageVector, text: String, hint: String, enabled:
             .height(92.dp)
             .clip(shape)
             .background(DjColors.CardRaised)
-            .border(1.5.dp, DjColors.LineStrong, shape)
+            .border(1.5.dp, if (enabled) DjColors.GoldRing else DjColors.LineStrong, shape)
             .tap(source, enabled = enabled, label = text, onClick = onClick)
-            .padding(horizontal = 28.dp),
+            .padding(horizontal = 22.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(if (enabled) icon else DjIcons.Lock, contentDescription = null, tint = if (enabled) DjColors.Gold else DjColors.Faint, modifier = Modifier.size(32.dp))
-        Spacer(Modifier.width(14.dp))
-        Text(text, style = body(DjType.BodyM, if (enabled) DjColors.Gold2 else DjColors.Muted, FontWeight.Bold), modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
-        Text(hint, style = body(DjType.LabelS, DjColors.Muted, FontWeight.SemiBold), maxLines = 1)
+        // 아이콘은 금빛 고리 안에, 이름 아래에 한 줄 설명, 누를 수 있으면 끝에 화살표 — 금빛 버튼과 같은 짜임이다.
+        Box(Modifier.size(56.dp).clip(CircleShape).background(DjColors.Cream).border(1.5.dp, if (enabled) DjColors.GoldRing else DjColors.Line, CircleShape), contentAlignment = Alignment.Center) {
+            Icon(if (enabled) icon else DjIcons.Lock, contentDescription = null, tint = if (enabled) DjColors.Gold2 else DjColors.Faint, modifier = Modifier.size(30.dp))
+        }
+        Spacer(Modifier.width(16.dp))
+        Column(Modifier.weight(1f)) {
+            Text(text, style = body(DjType.BodyM, if (enabled) DjColors.Gold2 else DjColors.Muted, FontWeight.Bold), maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(hint, style = body(DjType.LabelS, DjColors.Muted, FontWeight.SemiBold), maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+        if (enabled) Icon(DjIcons.ChevronRight, contentDescription = null, tint = DjColors.Gold, modifier = Modifier.size(36.dp))
     }
 }
 
