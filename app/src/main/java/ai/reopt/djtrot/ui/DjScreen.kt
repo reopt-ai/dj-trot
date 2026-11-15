@@ -132,14 +132,15 @@ fun DjScreen(app: DjTrotApp, player: Player?) {
  * 🔑 탭은 화면 아래에 둔다 — 운전석에서 손이 닿기 쉬운 쪽이고, Pleos GNB와 같은 높이 흐름이다.
  */
 private enum class Section(val label: String, val icon: ImageVector) {
+    // 🔑 적힌 순서가 좁은 창의 탭 순서다 — 재생 · DJ · 노래 · 트롯생성 · 설정. 듣는 칸을 앞에, 만드는 칸과 설정을 뒤에 둔다.
     PLAY("재생", DjIcons.Disc),
-
-    /** 트롯생성 — 이 길의 사연으로 노래를 만든다(이 길의 생성곡 카드, 사연의 재료, 만든 노래). */
-    CREATE("트롯생성", DjIcons.Sparkle),
-    SONGS("노래", DjIcons.Queue),
 
     /** DJ — 좁은 창에서만 탭이다. 넓은 창에서는 오른쪽 열 위에 DJ가 늘 보인다([DjCard]). */
     DJ("DJ", DjIcons.Mic),
+    SONGS("노래", DjIcons.Queue),
+
+    /** 트롯생성 — 이 길의 사연으로 노래를 만든다(이 길의 생성곡 카드, 사연의 재료, 만든 노래). */
+    CREATE("트롯생성", DjIcons.Sparkle),
 
     /** 설정 — 길 위의 상황을 버튼으로 흉내 내는 시연과 DJ 멘트 살펴보기(공모전·전시용, `BuildConfig.DEMO`). */
     DEMO("설정", DjIcons.Settings),
