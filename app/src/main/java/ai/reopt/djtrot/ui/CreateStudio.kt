@@ -118,7 +118,7 @@ fun CreateStudio(app: DjTrotApp, suggestion: SongRequest, djId: String, djName: 
         val current = order
         when {
             shown == "relay" && current != null -> RelayAct(current, djId, djName)
-            shown == "premiere" && current?.song != null -> PremiereAct(current.song, current.request, cover = current.song.cover?.url?.let { app.api.absolute(it).toUri() }, playing = nowPlaying && current.song.id == nowSongId, onListen = { player?.let { playMade(it, current.song.id) } }, onAgain = app.orders::dismiss)
+            shown == "premiere" && current?.song != null -> PremiereAct(current.song, current.request, cover = current.song.cover?.url?.let { app.api.absolute(it).toUri() }, playing = nowPlaying && current.song.id == nowSongId, onListen = { player?.let { playMade(it, current.song.id) } }, onPause = { player?.pause() }, onAgain = app.orders::dismiss)
             else -> RequestAct(app, suggestion, djName, drive, driving, failed = current?.takeIf { it.state == "failed" })
         }
     }
@@ -639,7 +639,7 @@ private fun DjFace(djId: String, djName: String, size: androidx.compose.ui.unit.
  * 🔑 이 칸의 주인공은 표지다 — "노래 한 곡이 나왔다"는 것이 글보다 먼저 보이게 한다.
  */
 @Composable
-private fun PremiereAct(song: TrotSong, request: SongRequest, cover: Uri?, playing: Boolean, onListen: () -> Unit, onAgain: () -> Unit) {
+private fun PremiereAct(song: TrotSong, request: SongRequest, cover: Uri?, playing: Boolean, onListen: () -> Unit, onPause: () -> Unit, onAgain: () -> Unit) {
     Column(Modifier.fillMaxSize()) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Icon(DjIcons.Sparkle, contentDescription = null, tint = DjColors.Gold, modifier = Modifier.size(34.dp))
@@ -696,12 +696,12 @@ private fun PremiereAct(song: TrotSong, request: SongRequest, cover: Uri?, playi
             Column(Modifier.weight(1f).clipToBounds(), verticalArrangement = Arrangement.spacedBy(6.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                 song.lyrics.lines.take(3).forEach { line -> Text(line, style = body(DjType.BodyM, DjColors.Ink), maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center) }
             }
+            Spacer(Modifier.height(14.dp))
+            // 🔑 바로 듣기 — 음반 바로 아래, 카드 안에 둔다. 나오는 중에는 같은 자리가 멈추기로 바뀐다(버튼이 사라지지 않는다).
+            if (playing) StudioAction(DjIcons.Pause, "잠시 멈추기", "지금 방송 중이에요", enabled = true, onClick = onPause)
+            else StudioAction(DjIcons.Play, "바로 듣기", "그대로 두면 다음 곡으로 나와요", enabled = true, gold = true, onClick = onListen)
         }
         Spacer(Modifier.height(16.dp))
-        if (!playing) {
-            StudioAction(DjIcons.Play, "지금 바로 듣기", "그대로 두면 다음 곡으로 나와요", enabled = true, gold = true, onClick = onListen)
-            Spacer(Modifier.height(12.dp))
-        }
         StudioAction(DjIcons.Sparkle, "한 곡 더 만들기", "새 사연으로", enabled = true, onClick = onAgain)
     }
 }
