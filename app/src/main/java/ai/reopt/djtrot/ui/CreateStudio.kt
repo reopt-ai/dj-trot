@@ -1,5 +1,9 @@
 package ai.reopt.djtrot.ui
 
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.text.style.TextAlign
+import androidx.core.net.toUri
+import android.net.Uri
 import ai.reopt.djtrot.BuildConfig
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -114,7 +118,7 @@ fun CreateStudio(app: DjTrotApp, suggestion: SongRequest, djId: String, djName: 
         val current = order
         when {
             shown == "relay" && current != null -> RelayAct(current, djId, djName)
-            shown == "premiere" && current?.song != null -> PremiereAct(current.song, current.request, playing = nowPlaying && current.song.id == nowSongId, onListen = { player?.let { playMade(it, current.song.id) } }, onAgain = app.orders::dismiss)
+            shown == "premiere" && current?.song != null -> PremiereAct(current.song, current.request, cover = current.song.cover?.url?.let { app.api.absolute(it).toUri() }, playing = nowPlaying && current.song.id == nowSongId, onListen = { player?.let { playMade(it, current.song.id) } }, onAgain = app.orders::dismiss)
             else -> RequestAct(app, suggestion, djName, drive, driving, failed = current?.takeIf { it.state == "failed" })
         }
     }
@@ -468,14 +472,21 @@ private fun RelayAct(order: Order, djId: String, djName: String) {
     val title = order.progress?.title?.takeIf { it.isNotBlank() }
     val lines = order.progress?.lines.orEmpty()
     Column(Modifier.fillMaxSize()) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("제작 중계", style = headline(DjType.TitleS, DjColors.Gold2), maxLines = 1)
-            Spacer(Modifier.width(16.dp))
-            LiveBadge()
-            Spacer(Modifier.weight(1f))
-            Text(if (calm) "약 2분" else "%d:%02d".format(waited / 60, waited % 60), style = digits(DjType.BodyM, DjColors.Muted))
+        // 🔑 제작실 천장에 미러볼이 걸려 있다 — 마스터트롯의 "작곡 중" 무대와 같은 그림이다. 머리글은 그 양옆에 둔다.
+        Box(Modifier.fillMaxWidth()) {
+            Mirrorball(size = 150.dp, spinning = !calm, modifier = Modifier.align(Alignment.TopCenter))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("제작 중계", style = headline(DjType.TitleS, DjColors.Gold2), maxLines = 1)
+                Spacer(Modifier.width(16.dp))
+                LiveBadge()
+                Spacer(Modifier.weight(1f))
+                Text(if (calm) "약 2분" else "%d:%02d".format(waited / 60, waited % 60), style = digits(DjType.BodyM, DjColors.Muted))
+            }
         }
-        Spacer(Modifier.height(26.dp))
+        // 지금 하는 일 — 미러볼 바로 아래 가운데에 둔다. 단계가 바뀌면 글이 바뀐다.
+        Spacer(Modifier.height(10.dp))
+        Text(stage.doing, style = body(DjType.BodyS, DjColors.Gold2, FontWeight.SemiBold), maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
+        Spacer(Modifier.height(16.dp))
         StageTrack(stage)
         Spacer(Modifier.height(26.dp))
         // DJ의 한마디 — 단계가 바뀔 때마다 바뀐다. 글로만 보인다.
@@ -490,9 +501,9 @@ private fun RelayAct(order: Order, djId: String, djName: String) {
                 }
             }
         }
-        Spacer(Modifier.height(22.dp))
+        Spacer(Modifier.height(16.dp))
         // 악보 — 가사가 나오기 전에는 맡긴 사연, 나온 뒤에는 제목과 가사 몇 줄.
-        Column(Modifier.weight(1f).fillMaxWidth().djCard(radius = 28.dp).padding(horizontal = 32.dp, vertical = 26.dp)) {
+        Column(Modifier.weight(1f).fillMaxWidth().djCard(radius = 28.dp).padding(horizontal = 32.dp, vertical = 20.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 StudioTag(order.request.topicLabel)
                 Spacer(Modifier.width(10.dp))
@@ -502,7 +513,7 @@ private fun RelayAct(order: Order, djId: String, djName: String) {
                     StudioTag(it)
                 }
             }
-            Spacer(Modifier.height(20.dp))
+            Spacer(Modifier.height(14.dp))
             if (title == null && lines.isEmpty()) {
                 Text("맡긴 사연", style = body(DjType.LabelM, DjColors.Muted, FontWeight.SemiBold))
                 Spacer(Modifier.height(8.dp))
@@ -590,8 +601,6 @@ private fun StageTrack(stage: Relay.Stage) {
                 )
             }
         }
-        Spacer(Modifier.height(10.dp))
-        Text(stage.doing, style = body(DjType.LabelM, DjColors.Muted), maxLines = 1)
     }
 }
 
@@ -625,46 +634,63 @@ private fun DjFace(djId: String, djName: String, size: androidx.compose.ui.unit.
 
 // ── 3막 첫 방송 ────────────────────────────────────────
 
+/**
+ * 첫 방송 — 완성곡을 음반처럼 내건다. 맨 위 가운데에 큰 표지(금빛 테와 빛무리), 그 아래 제목과 장르, 가사 몇 줄.
+ * 🔑 이 칸의 주인공은 표지다 — "노래 한 곡이 나왔다"는 것이 글보다 먼저 보이게 한다.
+ */
 @Composable
-private fun PremiereAct(song: TrotSong, request: SongRequest, playing: Boolean, onListen: () -> Unit, onAgain: () -> Unit) {
+private fun PremiereAct(song: TrotSong, request: SongRequest, cover: Uri?, playing: Boolean, onListen: () -> Unit, onAgain: () -> Unit) {
     Column(Modifier.fillMaxSize()) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Icon(DjIcons.Sparkle, contentDescription = null, tint = DjColors.Gold, modifier = Modifier.size(34.dp))
             Spacer(Modifier.width(12.dp))
-            Text("첫 방송", style = headline(DjType.TitleS, DjColors.Gold2), maxLines = 1)
+            Text("첫 방송", style = headline(DjType.TitleS, DjColors.Gold2), modifier = Modifier.weight(1f), maxLines = 1)
+            Pill(if (playing) DjIcons.VolumeOn else DjIcons.Note, if (playing) "지금 방송 중" else "방금 완성", active = true)
         }
-        Spacer(Modifier.height(22.dp))
+        Spacer(Modifier.height(18.dp))
         Column(
             Modifier
                 .weight(1f)
                 .fillMaxWidth()
                 .djCard(radius = 32.dp, background = DjColors.Selected, line = DjColors.Gold.copy(alpha = 0.7f))
-                .background(Brush.verticalGradient(listOf(DjColors.Gold.copy(alpha = 0.14f), Color.Transparent)))
-                .padding(horizontal = 36.dp, vertical = 32.dp),
+                .background(Brush.verticalGradient(listOf(DjColors.Gold.copy(alpha = 0.2f), Color.Transparent)))
+                .padding(horizontal = 36.dp, vertical = 26.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            Text(if (playing) "지금 방송 중" else "이 길에서 태어난 새 노래", style = body(DjType.LabelM, DjColors.Gold, FontWeight.Bold))
-            Spacer(Modifier.height(10.dp))
+            // 표지 — 뒤로 금빛 빛무리가 번지고, 금빛 테를 두른다.
+            val shape = RoundedCornerShape(30.dp)
+            Box(
+                Modifier
+                    // 빛무리는 자리를 차지하지 않게 뒤에 그린다 — 표지보다 넓게 번진다.
+                    .drawBehind { drawCircle(Brush.radialGradient(listOf(DjColors.Gold.copy(alpha = 0.38f), Color.Transparent), radius = size.width * 0.95f), radius = size.width * 0.95f) }
+                    .shadow(28.dp, shape, ambientColor = DjColors.Gold, spotColor = DjColors.GoldDeep)
+                    .border(3.dp, Brush.verticalGradient(listOf(DjColors.Gold2, DjColors.GoldDeep)), shape),
+            ) {
+                Cover(cover, song.style, size = PREMIERE_COVER, radius = 30.dp, seed = song.id)
+            }
+            Spacer(Modifier.height(22.dp))
+            Text("이 길에서 태어난 새 노래", style = body(DjType.LabelM, DjColors.Gold, FontWeight.Bold), maxLines = 1)
+            Spacer(Modifier.height(6.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("‘${song.title}’", style = headline(DjType.HeadlineS, DjColors.Gold2), maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+                Text("‘${song.title}’", style = headline(DjType.HeadlineS, DjColors.Gold2), maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
                 if (playing) {
-                    Spacer(Modifier.width(20.dp))
-                    Equalizer(playing = true, height = 44.dp)
+                    Spacer(Modifier.width(18.dp))
+                    Equalizer(playing = true, height = 40.dp)
                 }
             }
-            Spacer(Modifier.height(16.dp))
+            Spacer(Modifier.height(12.dp))
             Row {
                 StudioTag(song.labels.topic.ifBlank { request.topicLabel })
                 Spacer(Modifier.width(10.dp))
                 StudioTag(song.labels.style.ifBlank { request.styleLabel })
             }
-            Spacer(Modifier.height(24.dp))
-            // 짧은 창에서는 넘치는 줄을 잘라 아래 사연과 겹치지 않게 한다.
-            Column(Modifier.weight(1f).clipToBounds(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                song.lyrics.lines.take(4).forEach { line -> Text(line, style = body(DjType.BodyL, DjColors.Ink), maxLines = 1, overflow = TextOverflow.Ellipsis) }
+            Spacer(Modifier.height(16.dp))
+            // 가사 몇 줄 — 짧은 창에서는 넘치는 줄을 잘라 낸다.
+            Column(Modifier.weight(1f).clipToBounds(), verticalArrangement = Arrangement.spacedBy(6.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                song.lyrics.lines.take(3).forEach { line -> Text(line, style = body(DjType.BodyM, DjColors.Ink), maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center) }
             }
-            Text("“${request.story}”", style = body(DjType.LabelM, DjColors.Muted), maxLines = 2, overflow = TextOverflow.Ellipsis)
         }
-        Spacer(Modifier.height(18.dp))
+        Spacer(Modifier.height(16.dp))
         if (!playing) {
             StudioAction(DjIcons.Play, "지금 바로 듣기", "그대로 두면 다음 곡으로 나와요", enabled = true, gold = true, onClick = onListen)
             Spacer(Modifier.height(12.dp))
@@ -672,6 +698,9 @@ private fun PremiereAct(song: TrotSong, request: SongRequest, playing: Boolean, 
         StudioAction(DjIcons.Sparkle, "한 곡 더 만들기", "새 사연으로", enabled = true, onClick = onAgain)
     }
 }
+
+/** 첫 방송 표지의 한 변. */
+private val PREMIERE_COVER = 300.dp
 
 @Composable
 private fun StudioTag(text: String) {
