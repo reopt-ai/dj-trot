@@ -34,6 +34,9 @@ import ai.pleos.playground.vehicle.listener.CruiseControlStateListener
 import ai.pleos.playground.vehicle.listener.DrivingModeStateListener
 import ai.pleos.playground.vehicle.listener.DrivingTimeListener
 import ai.pleos.playground.vehicle.listener.EvBatteryStateOfChargeListener
+import ai.pleos.playground.vehicle.listener.HvacDefrosterStateListener
+import ai.pleos.playground.vehicle.listener.HvacSeatTemperatureListener
+import ai.pleos.playground.vehicle.listener.HvacSeatVentilationListener
 import ai.pleos.playground.vehicle.listener.LightStateListener
 import ai.pleos.playground.vehicle.listener.SeatOccupancyListener
 import ai.pleos.playground.vehicle.listener.TurnSignalStateListener
@@ -57,7 +60,7 @@ import kotlinx.coroutines.flow.update
 
 /**
  * DJ에게 필요한 차량 신호를 모은다.
- * - Pleos Vehicle: 주행 모드·배터리·방향지시등, 달린 시간·크루즈·안개등, 와이퍼(비), 동승자.
+ * - Pleos Vehicle: 주행 모드·배터리·방향지시등, 달린 시간·크루즈·안개등, 와이퍼(비), 동승자, 앞유리 성에 제거, 운전석 열선·통풍.
  * - Pleos NaviHelper: 현재 주소·좌표·목적지·남은 시간·안내 시점·출발·경유지·도착, 정체·사고·공사, 곧 지나는 터널·톨게이트·휴게소,
  *   주의 구간(어린이보호구역, 안개 잦은 곳, 미끄러운 길, 야생동물, 사고 잦은 곳), 집·회사 즐겨찾기.
  * - AAOS 표준 Car API: 기어·충전구·충전기 연결·바깥 기온·주행 중 UX 제한([AaosCar]).
@@ -138,6 +141,32 @@ class CarSignals(context: Context) {
     private val fogLightListener = object : LightStateListener {
         override fun onLightStateUpdated(state: LightState?) = _state.update { it.copy(fog = state == LightState.ON) }
         override fun onFailed(e: Exception) = failed(SignalBoard.FOG_LIGHT, e)
+    }
+
+    private val defrostListener = object : HvacDefrosterStateListener {
+        override fun onHvacDefrosterStateUpdated(state: Boolean?) = _state.update { it.copy(defrosting = state == true) }
+        override fun onFailed(e: Exception) = failed(SignalBoard.DEFROST, e)
+    }
+
+    /**
+     * 운전석 시트 온도 단계 — 양수는 열선, 음수는 냉방이다(AAOS `HVAC_SEAT_TEMPERATURE`와 같은 뜻).
+     * 🔑 통풍과 시트 냉방은 따로 온다 — 둘 중 하나라도 켜져 있으면 "시원한 시트"로 본다.
+     */
+    private var seatChill = false
+    private var seatVent = false
+    private val seatTemperatureListener = object : HvacSeatTemperatureListener {
+        override fun onHvacSeatTemperatureUpdated(temperature: Int?) {
+            seatChill = (temperature ?: 0) < 0
+            _state.update { it.copy(seatHeat = (temperature ?: 0) > 0, seatCool = seatChill || seatVent) }
+        }
+        override fun onFailed(e: Exception) = failed(SignalBoard.SEAT_HEAT, e)
+    }
+    private val seatVentilationListener = object : HvacSeatVentilationListener {
+        override fun onHvacSeatVentilationUpdated(ventilation: Int?) {
+            seatVent = (ventilation ?: 0) > 0
+            _state.update { it.copy(seatCool = seatChill || seatVent) }
+        }
+        override fun onFailed(e: Exception) = failed(SignalBoard.SEAT_COOL, e)
     }
 
     /**
@@ -305,7 +334,9 @@ class CarSignals(context: Context) {
         navi = null
         aaos.stop()
         synchronized(occupied) { occupied.clear() }
-        _state.update { it.copy(guidanceSoon = false, signaling = false, ahead = null, caution = null, schoolZone = false, raining = false, company = false, restricted = false, uxFlags = 0) }
+        seatChill = false
+        seatVent = false
+        _state.update { it.copy(defrosting = false, seatHeat = false, seatCool = false, guidanceSoon = false, signaling = false, ahead = null, caution = null, schoolZone = false, raining = false, company = false, restricted = false, uxFlags = 0) }
     }
 
     /**
@@ -385,6 +416,24 @@ class CarSignals(context: Context) {
                     undo += { car.getSeat().unregisterSeatOccupancy(area, listener) }
                 }.onFailure { warn("좌석 $seat", it) }
             }
+        }
+        watch(car, SignalBoard.DEFROST, { ok, no -> car.getHVAC().checkHvacDefrosterCapabilities({ config, _ -> ok(config) }, no) }) {
+            val windshield = WindowArea(WindowValue.FRONT_WINDSHIELD)
+            car.getHVAC().registerHvacDefrosterState(windshield, defrostListener)
+            undo += { car.getHVAC().unregisterHvacDefrosterState(windshield, defrostListener) }
+            car.getHVAC().getHvacDefrosterState(windshield, { on -> defrostListener.onHvacDefrosterStateUpdated(on) }, { })
+        }
+        // 🔑 운전석만 본다 — DJ가 건네는 말의 상대가 운전자다.
+        val driver = SeatArea(DRIVER_SEAT)
+        watch(car, SignalBoard.SEAT_HEAT, { ok, no -> car.getSeat().checkSeatTemperatureCapabilities({ config, _ -> ok(config) }, no) }) {
+            car.getSeat().registerHvacSeatTemperature(driver, seatTemperatureListener)
+            undo += { car.getSeat().unregisterHvacSeatTemperature(driver, seatTemperatureListener) }
+            car.getSeat().getHvacSeatTemperature(driver, { level -> seatTemperatureListener.onHvacSeatTemperatureUpdated(level) }, { })
+        }
+        watch(car, SignalBoard.SEAT_COOL, { ok, no -> car.getSeat().checkSeatVentilationCapabilities({ config, _ -> ok(config) }, no) }) {
+            car.getSeat().registerHvacSeatVentilation(driver, seatVentilationListener)
+            undo += { car.getSeat().unregisterHvacSeatVentilation(driver, seatVentilationListener) }
+            car.getSeat().getHvacSeatVentilationState(driver, { level -> seatVentilationListener.onHvacSeatVentilationUpdated(level) }, { })
         }
     }.onFailure { warn("Vehicle SDK", it) }
 
@@ -500,6 +549,8 @@ class CarSignals(context: Context) {
         const val RAIN_ON_MS = 20_000L
         const val RAIN_OFF_MS = 180_000L
         const val SAME_TRIP_MS = 10 * 60_000L
+        /** 운전석 — 왼쪽 핸들 기준이다. */
+        val DRIVER_SEAT = SeatValue.ROW_1_LEFT
         /** 🔑 운전석(1열 왼쪽) 말고 누가 탔는지만 본다. */
         val PASSENGER_SEATS = listOf(SeatValue.ROW_1_RIGHT, SeatValue.ROW_2_LEFT, SeatValue.ROW_2_CENTER, SeatValue.ROW_2_RIGHT)
         /** 안내 음성이 없는 TBT — 직진과 알 수 없음은 말을 미룰 까닭이 없다. */

@@ -40,6 +40,12 @@ data class DemoDrive(
     val outsideCelsius: Int? = null,
     /** 스포츠 모드로 달린다. */
     val sport: Boolean = false,
+    /** 앞유리 성에 제거를 켰다. */
+    val defrosting: Boolean = false,
+    /** 운전석 열선을 켰다. */
+    val seatHeat: Boolean = false,
+    /** 운전석 통풍을 켰다. */
+    val seatCool: Boolean = false,
     /** 지금 좌표 — 광고의 좌표 조건을 흉내 낼 때만 쓴다. null이면 실제 값. */
     val location: GeoPoint? = null,
     /** 시간대 인사를 바꿔 보이는 시(0~23). null이면 지금 시각. */
@@ -68,6 +74,9 @@ data class DemoDrive(
         batteryPercent = batteryPercent ?: real.batteryPercent,
         outsideCelsius = outsideCelsius ?: real.outsideCelsius,
         drivingMode = if (sport) "SPORT" else real.drivingMode,
+        defrosting = defrosting,
+        seatHeat = seatHeat,
+        seatCool = seatCool,
     )
 
     /** DJ가 인사에 쓰는 시각. */
@@ -77,7 +86,7 @@ data class DemoDrive(
     fun road(): DemoDrive = copy(
         gear = GearState.DRIVE, traffic = null, ahead = null, raining = false, fog = false, company = false, cruising = false,
         schoolZone = false, signaling = false, charging = false, freeDrive = false, tripMinutes = null, location = null,
-        caution = null, batteryPercent = null, outsideCelsius = null, sport = false,
+        caution = null, batteryPercent = null, outsideCelsius = null, sport = false, defrosting = false, seatHeat = false, seatCool = false,
     )
 
     /** 화면에 보이는 지금 상황 한 줄. */
@@ -101,6 +110,9 @@ data class DemoDrive(
         batteryPercent?.let { "배터리 $it%" },
         outsideCelsius?.let { "바깥 ${it}℃" },
         "스포츠 모드".takeIf { sport },
+        "성에 제거".takeIf { defrosting },
+        "시트 열선".takeIf { seatHeat },
+        "시트 통풍".takeIf { seatCool },
         when (ahead) {
             RoadAhead.TUNNEL -> "곧 터널"
             RoadAhead.TOLL -> "곧 톨게이트"
@@ -203,6 +215,9 @@ object Demo {
             road("cold", "추운 날", "바깥 영하 5도") { it.copy(outsideCelsius = -5) },
             road("hot", "더운 날", "바깥 33도") { it.copy(outsideCelsius = 33) },
             road("sport", "스포츠 모드", "주행 모드 SPORT") { it.copy(sport = true) },
+            road("defrost", "성에 제거", "앞유리 김 서림") { it.copy(defrosting = true) },
+            road("seat.heat", "시트 열선", "운전석 열선 켬") { it.copy(seatHeat = true) },
+            road("seat.cool", "시트 통풍", "운전석 통풍 켬") { it.copy(seatCool = true) },
         )),
         DemoGroup("시간대", listOf(
             hour("hour.dawn", "새벽", 4), hour("hour.morning", "아침", 8), hour("hour.afternoon", "오후", 14),

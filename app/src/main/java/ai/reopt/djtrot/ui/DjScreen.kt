@@ -97,6 +97,7 @@ import java.time.format.DateTimeFormatter
 import java.util.Locale
 import kotlin.math.ceil
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.update
 
 /** 기준 창 — Pleos Connect 앱 영역 두 칸(가로)은 1682×1210dp(mdpi), 한 칸(세로)은 그 절반 폭이다. */
 private val WideWidth = 1682.dp
@@ -168,6 +169,10 @@ private class StageModel(
     val talks: Boolean,
     val onToggleTalks: () -> Unit,
     val onReplay: () -> Unit,
+    /** 바꿀 수 있는 다음 DJ의 이름 — 준비된 다른 DJ가 없으면 null(버튼을 잠근다). */
+    val nextDj: String?,
+    /** 다음 DJ로 바꾼다. 다음 멘트부터 그 DJ가 말한다. */
+    val onSwitchDj: () -> Unit,
     /** 시연이 덧씌운 상황. 시연 중이 아니면 null. */
     val demo: DemoDrive?,
     val onDemo: (DemoStep) -> Unit,
@@ -223,6 +228,9 @@ private fun DjContent(app: DjTrotApp, player: Player?, compact: Boolean) {
     // DJ가 새로 한 말은 DJ 탭을 열 때까지 점으로 알린다.
     LaunchedEffect(shown, dj.line) { if (shown == Section.DJ) seenLine = dj.line }
     val fresh = dj.line != null && dj.line != seenLine && shown != Section.DJ
+    // 🔑 DJ 변경 — 준비된 DJ를 차례로 돈다(지금 DJ 다음 사람). 준비된 DJ가 하나뿐이면 바꿀 수 없다.
+    val ready = djs.filter { it.ready }
+    val next = ready.getOrNull((ready.indexOfFirst { it.id == djId } + 1) % ready.size.coerceAtLeast(1))?.takeIf { it.id != djId }
 
     val model = StageModel(
         app = app,
@@ -251,6 +259,13 @@ private fun DjContent(app: DjTrotApp, player: Player?, compact: Boolean) {
             if (!talks) app.voice.stop()
         },
         onReplay = { dj.line?.let(app.voice::speak) },
+        nextDj = next?.name,
+        onSwitchDj = {
+            next?.let { to ->
+                app.selectDj(to.id)
+                if (app.djId.value == to.id) app.dj.update { it.say("지금부터 진행은 ${to.name}입니다. 다음 곡에서 인사드릴게요.") }
+            }
+        },
         demo = demo,
         onDemo = app::demo,
         onEndDemo = app::endDemo,
@@ -480,7 +495,8 @@ private fun StagePanel(view: Section, m: StageModel, player: Player?, modifier: 
                 ErrorNotice(it)
             }
             // 🔑 설정 칸에서는 진행 막대와 조작부를 그리지 않는다 — 메뉴와 시뮬레이션 버튼에 자리를 내준다.
-            if (live && view != Section.DEMO) {
+            //    트롯생성 칸도 그리지 않는다 — 사연 신청·제작 중계·첫 방송에 집중하게. 재생 조작은 재생 칸과 스티어링 휠·시스템 미디어로 한다.
+            if (live && view != Section.DEMO && view != Section.CREATE) {
                 Spacer(Modifier.height(24.dp))
                 Transport(m.ui, m.progress, player)
             }
@@ -501,8 +517,6 @@ private fun StageIdle(player: Player?, modifier: Modifier) {
             SatinButton("DJ 트롯 시작", Modifier.fillMaxWidth(), height = 120.dp) {
                 playList(player, Shelf.PICKS.id)
             }
-            Spacer(Modifier.height(16.dp))
-            Text("추천곡부터 이어서 틀어요", style = body(DjType.LabelM, DjColors.Muted), modifier = Modifier.align(Alignment.CenterHorizontally))
         }
     }
 }
@@ -630,6 +644,7 @@ private fun DjView(m: StageModel, modifier: Modifier) {
                 active = m.talks,
                 onClick = m.onToggleTalks,
             )
+            ActionButton(DjIcons.Mic, "DJ 변경", Modifier.weight(1f), enabled = m.nextDj != null, onClick = m.onSwitchDj)
         }
     }
 }
@@ -695,7 +710,7 @@ private fun DjCard(m: StageModel) {
 }
 
 /**
- * DJ 카드의 설정 버튼 — 누르면 작은 메뉴가 열린다(다시 듣기, 멘트 켜기·끄기). 바깥을 누르면 닫힌다.
+ * DJ 카드의 설정 버튼 — 누르면 작은 메뉴가 열린다(다시 듣기, 멘트 켜기·끄기, DJ 변경). 바깥을 누르면 닫힌다.
  * 🔑 카드에는 DJ의 말만 크게 두고, 가끔 쓰는 조작은 이 버튼 뒤로 모은다.
  */
 @Composable
@@ -732,6 +747,11 @@ private fun DjMenu(m: StageModel) {
                         active = m.talks,
                         onClick = m.onToggleTalks,
                     )
+                    // 준비된 다음 DJ로 바꾼다 — 누구로 바뀌는지 이름을 함께 보인다.
+                    ActionButton(DjIcons.Mic, m.nextDj?.let { "DJ 변경 · $it" } ?: "DJ 변경", Modifier.fillMaxWidth(), enabled = m.nextDj != null) {
+                        open = false
+                        m.onSwitchDj()
+                    }
                 }
             }
         }

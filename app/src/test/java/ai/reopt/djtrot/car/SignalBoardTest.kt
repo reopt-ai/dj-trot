@@ -35,6 +35,8 @@ class SignalBoardTest {
         assertEquals("미끄러운 길", value(drive.copy(caution = Caution.SLIPPERY), "주의 구간"))
         assertEquals("-3℃", value(drive.copy(outsideCelsius = -3), "바깥 기온"))
         assertEquals("꽂힘", value(drive.copy(chargerConnected = true), "충전기"))
+        assertEquals("켜짐", value(drive.copy(seatHeat = true), SignalBoard.SEAT_HEAT))
+        assertEquals("꺼짐", value(drive, SignalBoard.DEFROST))
     }
 
     @Test fun `차가 주지 않는 값은 지원 안 함으로 보인다`() {

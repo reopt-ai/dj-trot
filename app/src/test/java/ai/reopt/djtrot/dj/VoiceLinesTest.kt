@@ -94,6 +94,7 @@ class VoiceLinesTest {
             listOf(
                 "rest_area", "tunnel", "toll", "jam", "accident", "long_drive", "charging", "company", "cruising", "free_drive",
                 "roadwork", "caution_fog", "caution_slippery", "caution_wildlife", "caution_accident", "low_battery", "cold", "hot", "sport",
+                "defrost", "seat_heat", "seat_cool",
             ),
             VoiceLines.Scene.entries.map { it.id },
         )
@@ -118,6 +119,11 @@ class VoiceLinesTest {
         assertEquals(VoiceLines.Scene.HOT, VoiceLines.scene(drive.copy(outsideCelsius = 31), seed = 0, local = false))
         assertEquals(VoiceLines.Scene.SPORT, VoiceLines.scene(drive.copy(drivingMode = "SPORT", cruising = true), seed = 0, local = false))
         assertNull(VoiceLines.scene(drive.copy(outsideCelsius = 18, drivingMode = "ECO"), seed = 0, local = false))
+        // 공조 — 성에 제거와 운전석 열선·통풍도 분위기 장면이다. 추운 날 열선을 켰으면 열선 이야기를 한다.
+        assertEquals(VoiceLines.Scene.DEFROST, VoiceLines.scene(drive.copy(defrosting = true, seatHeat = true), seed = 0, local = false))
+        assertEquals(VoiceLines.Scene.SEAT_HEAT, VoiceLines.scene(drive.copy(seatHeat = true, outsideCelsius = -3), seed = 0, local = false))
+        assertEquals(VoiceLines.Scene.SEAT_COOL, VoiceLines.scene(drive.copy(seatCool = true, outsideCelsius = 33), seed = 0, local = false))
+        assertNull(VoiceLines.scene(drive.copy(seatHeat = true), seed = 1, local = false))
     }
 
     @Test fun `서버가 모르는 장면은 보내지 않는다`() {

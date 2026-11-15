@@ -23,6 +23,9 @@ object SignalBoard {
     const val FOG_LIGHT = "앞 안개등"
     const val TURN_SIGNAL = "방향지시등"
     const val COMPANY = "동승자"
+    const val DEFROST = "앞유리 성에 제거"
+    const val SEAT_HEAT = "운전석 열선"
+    const val SEAT_COOL = "운전석 통풍"
 
     /** 차가 주지 않는 값에 보이는 글. */
     const val UNSUPPORTED = "지원 안 함"
@@ -36,6 +39,9 @@ object SignalBoard {
         Signal(FOG_LIGHT, onOff(drive.fog), SignalSource.VEHICLE),
         Signal(TURN_SIGNAL, onOff(drive.signaling), SignalSource.VEHICLE),
         Signal(COMPANY, if (drive.company) "있음" else "없음", SignalSource.VEHICLE),
+        Signal(DEFROST, onOff(drive.defrosting), SignalSource.VEHICLE),
+        Signal(SEAT_HEAT, onOff(drive.seatHeat), SignalSource.VEHICLE),
+        Signal(SEAT_COOL, onOff(drive.seatCool), SignalSource.VEHICLE),
         Signal("지금 위치", drive.region ?: drive.currentAddress, SignalSource.NAVI),
         Signal("목적지", drive.destination?.let { place -> place.remainMinutes?.let { "${place.name} · ${it}분 남음" } ?: place.name }, SignalSource.NAVI),
         Signal(

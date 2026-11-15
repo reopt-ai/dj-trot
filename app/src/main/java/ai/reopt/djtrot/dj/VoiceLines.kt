@@ -37,6 +37,9 @@ object VoiceLines {
         COLD("cold"),
         HOT("hot"),
         SPORT("sport"),
+        DEFROST("defrost"),
+        SEAT_HEAT("seat_heat"),
+        SEAT_COOL("seat_cool"),
     }
 
     /** 처음부터 있던 장면 — 어느 서버나 받는다. */
@@ -83,7 +86,7 @@ object VoiceLines {
 
     /**
      * 지금 길의 장면. 급한 것부터 — 곧 지나는 곳, 주의 구간, 사고·공사·정체, 오래 달림, 배터리 부족.
-     * 그다음은 분위기(충전, 동승, 바깥 기온, 스포츠 모드, 크루즈, 발길 닿는 대로).
+     * 그다음은 분위기(충전, 동승, 성에 제거, 시트 열선·통풍, 바깥 기온, 스포츠 모드, 크루즈, 발길 닿는 대로).
      * 🔑 분위기 장면은 곡의 절반([seed] 짝수)에만 쓴다 — 크루즈를 켜 둔 내내 같은 말만 하지 않게.
      *    [always]가 참이면(시연) 곡을 가리지 않고 쓴다.
      * 🔴 [local]이 거짓이면 서버로 보낼 값이다 — 동승자 유무는 기기 밖으로 내보내지 않는다.
@@ -116,6 +119,9 @@ object VoiceLines {
         return when {
             drive.charging -> Scene.CHARGING
             drive.company && local -> Scene.COMPANY
+            drive.defrosting -> Scene.DEFROST
+            drive.seatHeat -> Scene.SEAT_HEAT
+            drive.seatCool -> Scene.SEAT_COOL
             drive.cold -> Scene.COLD
             drive.hot -> Scene.HOT
             drive.sport && !drive.stopped -> Scene.SPORT

@@ -86,6 +86,8 @@ Pleos Playground Maven 저장소에서 받습니다(`settings.gradle.kts`, 버�
 | `Light.registerFrontFogLightState` | `CAR_LIGHTS` | 앞 안개등이 켜지면 안개 낀 길의 인사 |
 | `Wiper.registerWiperState(FRONT_WINDSHIELD)` | `CAR_WINDOWS` | 와이퍼가 20초 넘게 움직이면 비 오는 길로 봄 |
 | `Seat.registerSeatOccupancy`(조수석·2열) | `CAR_SEATS` | 동승자가 있는지만. 기기 안에서만 쓰고 서버로 보내지 않음 |
+| `Seat.registerHvacSeatTemperature` · `registerHvacSeatVentilation`(운전석) | `CAR_SEATS` | 운전석 열선·통풍을 켰을 때의 한마디 |
+| `HVAC.registerHvacDefrosterState(FRONT_WINDSHIELD)` | `CAR_CLIMATE` | 앞유리 성에 제거가 켜지면 천천히 가자고 함 |
 
 폐기 예정으로 표시된 Vehicle API(`Gear`, `registerEvChargePortOpen`, `getEvBatteryLevel` 등)는 쓰지 않습니다. 같은 값은 아래 AAOS 표준 속성으로 읽습니다(Pleos SDK API 정책: 표준에 있으면 표준을 쓴다).
 
@@ -117,7 +119,7 @@ Client ID/Secret이 빌드에 있으면 TTS·STT는 `HYBRID`(서버 우선), 없
 | FusedLocation SDK | 실행 중 위치 권한(`FUSED_LOCATION`)을 물어야 하고 차종별 지원이 다름. 필요한 위치는 내비가 주는 값으로 충분 |
 | Gleo Interface(`assets/schema.json`) | 스키마 심사가 필요. 음성 검색은 Media3 표준 검색으로 열어 둠 |
 | NaviHelper 경로 요청(`requestRoute`, `addWaypoint` …) | 권한 승인(`NAVI_ROUTE_SEARCH`)이 필요하고, 음악 앱이 목적지를 바꾸지 않음 |
-| Vehicle 제어 API(`setXXX`), 그 밖의 도메인(HVAC, Door, Window, Safety …) | 음악 앱의 기능과 직접 관련이 없음(Pleos 보안 가이드: 필요한 API만) |
+| Vehicle 제어 API(`setXXX`), 그 밖의 도메인(Door, Window, Safety …)과 공조의 나머지 값(온도·풍량·에어컨) | 음악 앱의 기능과 직접 관련이 없음(Pleos 보안 가이드: 필요한 API만) |
 | LLM SDK | Pleos가 제공을 끝냄(2026-10-19) |
 
 ### AAOS 표준 API
@@ -165,6 +167,8 @@ Client ID/Secret이 빌드에 있으면 TTS·STT는 `HYBRID`(서버 우선), 없
 | 배터리 15% 이하 | Vehicle `EvBattery` | `scene.low_battery` |
 | 서서 충전 | AAOS 충전구·충전기 + 기어 | `scene.charging` |
 | 동승자(기기 안에서만) | Vehicle `Seat` | `scene.company` |
+| 앞유리 성에 제거 | Vehicle `HVAC` | `scene.defrost` |
+| 운전석 열선·통풍 | Vehicle `Seat` | `scene.seat_heat` · `seat_cool` |
 | 바깥 0℃ 이하·30℃ 이상 | AAOS `ENV_OUTSIDE_TEMPERATURE` | `scene.cold` · `hot` |
 | 스포츠 모드 | Vehicle `DrivingMode` | `scene.sport` |
 | 크루즈 주행 | Vehicle `DrivingMode` | `scene.cruising` |
@@ -314,7 +318,7 @@ uv run --no-project tools/mock_djtrot.py --audio-dir ~/Music/trot --upstream htt
 
 ### 차량 신호 흉내 내기
 
-화면 아래 탭의 **설정**에는 자동 시연(정해 둔 길을 차례로 보여 줌), 시뮬레이션, DJ 멘트 살펴보기, 차량 신호(지금 받는 값을 SDK별로 표시), DJ 설정(멘트 켜기·길게 말하는 간격·멘트 중 음악 크기), 연결·계정, 앱 정보가 있습니다. **설정 › 시뮬레이션**에서도 같은 상황을 버튼으로 흉내 낼 수 있습니다(출발, 비·안개·정체·터널·휴게소·동승자 같은 길 위의 장면, 공사·주의 구간·배터리 부족·추위·더위·스포츠 모드, 시간대, 경유·도착·충전). 노래가 나오는 중에 누르면 DJ가 지금 곡 위에서 그 상황으로 다시 말합니다. "실제 신호로"를 누르면 덧씌운 값이 지워집니다. 심사·전시처럼 차가 서 있는 자리에서 쓰는 기능이고, `-Pdjtrot.demo=false`로 빌드하면 탭이 없습니다.
+화면 아래 탭의 **설정**에는 자동 시연(정해 둔 길을 차례로 보여 줌), 시뮬레이션, DJ 멘트 살펴보기, 차량 신호(지금 받는 값을 SDK별로 표시), DJ 설정(멘트 켜기·길게 말하는 간격·멘트 중 음악 크기), 연결·계정, 앱 정보가 있습니다. **설정 › 시뮬레이션**에서도 같은 상황을 버튼으로 흉내 낼 수 있습니다(출발, 비·안개·정체·터널·휴게소·동승자 같은 길 위의 장면, 공사·주의 구간·배터리 부족·추위·더위·스포츠 모드·성에 제거·시트 열선·통풍, 시간대, 경유·도착·충전). 노래가 나오는 중에 누르면 DJ가 지금 곡 위에서 그 상황으로 다시 말합니다. "실제 신호로"를 누르면 덧씌운 값이 지워집니다. 심사·전시처럼 차가 서 있는 자리에서 쓰는 기능이고, `-Pdjtrot.demo=false`로 빌드하면 탭이 없습니다.
 
 에뮬레이터는 정체, 터널·휴게소, 와이퍼, 동승자, 달린 시간 같은 값을 주지 않고 마이크 인식도 되지 않습니다. `tools/trigger.py`는 디버그 빌드에만 있는 수신기에 adb 브로드캐스트를 보내 이 신호를 실제 값 위에 덧씌우고, 그 신호로 기기 DJ가 할 말과 서버로 가는 맥락을 찍어 줍니다. 파이썬 표준 라이브러리와 adb만 씁니다.
 
@@ -386,7 +390,7 @@ docs/                구조 설명, 공모전·Pleos 요건 정리, README 이�
 
 - **운영 서버 준비 중**: 기본 빌드가 보는 운영 서버 주소는 아직 열리지 않았습니다(2026-10). 그동안은 `-Pdjtrot.api`로 개발 서버를 지정합니다.
 - **기기 TTS(에뮬레이터)**: 서버의 DJ 음성 팩이 켜져 있으면 DJ는 그 음성으로 말하고 기기 TTS는 쓰이지 않습니다. 음성 팩이 없을 때 쓰는 Pleos TTS 온디바이스 엔진은 에뮬레이터에서 `ON_DEVICE_ENGINE_ERROR`를 낸 적이 있습니다. 2026-11-15에 로케일을 `ko-KR`로 바로잡았지만(그전에는 `ko`를 보냈습니다) 소리가 나는지는 다시 확인하지 않았습니다. Client ID/Secret을 넣으면 서버 모드로 말합니다.
-- **새 멘트는 음성 팩을 다시 만들어야 소리로 나옴**: 2026-11-15에 더한 장면(공사, 주의 구간 넷, 배터리 부족, 추위·더위, 스포츠 모드)과 노래 완성·광고 하루 상한 알림은 서버가 그 조각을 만들어 둔 뒤부터 DJ 목소리로 나옵니다. 그전에는 시간대·날씨 인사로 대신하고, 알림은 글로만 보입니다.
+- **새 멘트는 음성 팩을 다시 만들어야 소리로 나옴**: 2026-11-15에 더한 장면(공사, 주의 구간 넷, 배터리 부족, 추위·더위, 스포츠 모드, 성에 제거, 시트 열선·통풍)과 노래 완성·광고 하루 상한 알림은 서버가 그 조각을 만들어 둔 뒤부터 DJ 목소리로 나옵니다. 그전에는 시간대·날씨 인사로 대신하고, 알림은 글로만 보입니다.
 - **Pleos TTS와 음악의 오디오 포커스는 실차 확인 전**: Pleos 음성 서비스가 말할 때 포커스를 어떻게 청하는지 문서에 없습니다. 음악이 일시 손실을 받으면 앱은 DJ 목소리도 함께 멈춥니다.
 - **주행 모드 값 없음(에뮬레이터)**: 에뮬레이터가 DrivingMode 속성을 지원하지 않아 화면에서 생략합니다.
 - **말로 사연 넣기(에뮬레이터)**: Pleos SpeechToText로 듣습니다. 에뮬레이터에서는 맥의 마이크를 에뮬레이터에 열어 줘야 하고, 온디바이스 엔진이 없으면 Client ID/Secret을 넣은 서버 모드로만 듣습니다. 듣지 못하면 카드에 까닭을 보이고 사연은 그대로 둡니다.

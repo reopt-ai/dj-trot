@@ -53,6 +53,9 @@ class DemoTest {
         assertEquals(VoiceLines.Scene.COLD, scene("cold"))
         assertEquals(VoiceLines.Scene.HOT, scene("hot"))
         assertEquals(VoiceLines.Scene.SPORT, scene("sport"))
+        assertEquals(VoiceLines.Scene.DEFROST, scene("defrost"))
+        assertEquals(VoiceLines.Scene.SEAT_HEAT, scene("seat.heat"))
+        assertEquals(VoiceLines.Scene.SEAT_COOL, scene("seat.cool"))
         // 다른 버튼을 누르면 앞 장면은 지워지고 실제 값으로 돌아간다.
         val after = press("cold", "sport", "rain").apply(DriveContext(outsideCelsius = 12, drivingMode = "ECO", batteryPercent = 80))
         assertEquals(12, after.outsideCelsius)

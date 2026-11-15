@@ -95,6 +95,9 @@ object DjScript {
             if (drive.charging) "충전하는 동안 한 곡 들으시죠." else null,
             if (drive.company) "함께 타신 분과 같이 들으시죠." else null,
             when {
+                drive.defrosting -> "유리에 김이 서렸나 보네요. 앞이 맑아질 때까지 천천히 가시죠."
+                drive.seatHeat -> "시트를 따뜻하게 데우셨네요. 따뜻한 노래 한 곡 들으시죠."
+                drive.seatCool -> "시트에 시원한 바람을 트셨네요. 시원한 노래 한 곡 들으시죠."
                 drive.cold -> "바깥이 많이 춥네요. 따뜻한 노래 한 곡 들으시죠."
                 drive.hot -> "바깥이 참 덥네요. 시원한 노래 한 곡 들으시죠."
                 else -> null

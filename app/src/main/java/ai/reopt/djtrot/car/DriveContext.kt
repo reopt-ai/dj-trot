@@ -130,6 +130,12 @@ data class DriveContext(
     val caution: Caution? = null,
     /** 바깥 기온(섭씨, AAOS `ENV_OUTSIDE_TEMPERATURE`). 차가 주지 않으면 null. */
     val outsideCelsius: Int? = null,
+    /** 앞유리 성에 제거가 켜져 있다(Pleos Vehicle HVAC) — 유리에 김이 서렸다고 본다. */
+    val defrosting: Boolean = false,
+    /** 운전석 열선이 켜져 있다(Pleos Vehicle Seat). */
+    val seatHeat: Boolean = false,
+    /** 운전석 통풍(또는 시트 냉방)이 켜져 있다. */
+    val seatCool: Boolean = false,
     /** 앞 안개등이 켜져 있다. */
     val fog: Boolean = false,
     /** 앞 유리 와이퍼가 계속 움직인다 — 비나 눈이 온다. */
